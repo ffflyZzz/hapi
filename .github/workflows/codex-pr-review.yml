@@ -90,6 +90,7 @@ jobs:
           safety-strategy: drop-sudo
           prompt-file: .github/prompts/codex-pr-review.md
           allow-bots: true
+          allow-users: "*"
 
   post-review:
     runs-on: ubuntu-latest

@@ -79,3 +79,4 @@ jobs:
           safety-strategy: drop-sudo
           prompt-file: .github/prompts/issue-auto-response.md
           allow-bots: true
+          allow-users: "*"
