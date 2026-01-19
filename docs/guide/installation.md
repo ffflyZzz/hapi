@@ -113,6 +113,8 @@ On first run, HAPI:
 | `HAPI_HOME` | `~/.hapi` | Config directory path |
 | `DB_PATH` | `~/.hapi/hapi.db` | Database file path |
 | `CORS_ORIGINS` | - | Allowed CORS origins |
+| `ELEVENLABS_API_KEY` | - | ElevenLabs API key for voice |
+| `ELEVENLABS_AGENT_ID` | Auto-created | Custom ElevenLabs agent ID |
 </details>
 
 ## CLI setup
@@ -219,6 +221,20 @@ With the runner running:
 - Your machine appears in the "Machines" list
 - You can spawn sessions remotely from the web app
 - Sessions persist even when the terminal is closed
+
+### Voice assistant setup
+
+Enable voice control:
+
+1. Get an API key from [elevenlabs.io](https://elevenlabs.io/app/settings/api-keys)
+2. Set the environment variable:
+
+```bash
+export ELEVENLABS_API_KEY="your-api-key"
+hapi server --relay
+```
+
+See [Voice Assistant](./voice-assistant.md) for usage details.
 
 ### Security notes
 

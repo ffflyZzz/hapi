@@ -24,6 +24,11 @@ See `src/configuration.ts` for all options.
 - `TELEGRAM_BOT_TOKEN` - Token from @BotFather.
 - `HAPI_PUBLIC_URL` - Public HTTPS URL for Telegram Mini App access. Also used to derive default CORS origins for the web app.
 
+### Optional (Voice)
+
+- `ELEVENLABS_API_KEY` - ElevenLabs API key for voice assistant.
+- `ELEVENLABS_AGENT_ID` - Custom ElevenLabs agent ID (auto-created if not set).
+
 ### Optional
 
 - `HAPI_LISTEN_HOST` - HTTP bind address (default: 127.0.0.1).
@@ -99,6 +104,10 @@ See `src/web/routes/` for all endpoints.
 ### Events (`src/web/routes/events.ts`)
 
 - `GET /api/events` - SSE stream for live updates.
+
+### Voice (`src/web/routes/voice.ts`)
+
+- `POST /api/voice/token` - Get ElevenLabs conversation token.
 
 ### CLI (`src/web/routes/cli.ts`)
 

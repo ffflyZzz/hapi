@@ -89,6 +89,10 @@ In the session view, tap the "Files" tab to:
 
 Yes. Open any session and use the chat interface to send messages directly to the AI agent.
 
+### How do I use voice control?
+
+Set `ELEVENLABS_API_KEY`, open a session in the web app, and click the microphone button. See [Voice Assistant](./voice-assistant.md).
+
 ## Security
 
 ### Is my data safe?
