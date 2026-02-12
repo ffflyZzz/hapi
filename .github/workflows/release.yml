@@ -14,8 +14,34 @@ jobs:
         steps:
             - uses: actions/checkout@v4
             - uses: oven-sh/setup-bun@v2
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: '20'
+                  registry-url: 'https://registry.npmjs.org'
             - run: bun install
             - run: bun run build:single-exe:all
+            - name: Publish npm packages
+              env:
+                  NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+              run: |
+                  if [[ -z "${NODE_AUTH_TOKEN}" ]]; then
+                      echo "NPM_TOKEN secret is required for npm publish"
+                      exit 1
+                  fi
+
+                  cd cli
+                  bun run prepare-npm-packages
+
+                  for pkg in \
+                      npm/darwin-arm64 \
+                      npm/darwin-x64 \
+                      npm/linux-arm64 \
+                      npm/linux-x64 \
+                      npm/win32-x64 \
+                      npm/main; do
+                      echo "Publishing ${pkg}..."
+                      (cd "${pkg}" && npm publish --access public)
+                  done
             - name: Package release artifacts
               run: |
                   cd cli/dist-exe

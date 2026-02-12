@@ -33,6 +33,10 @@ More options: [Quick Start](docs/guide/quick-start.md) | [Installation](docs/gui
 - [Why HAPI](docs/guide/why-hapi.md)
 - [FAQ](docs/guide/faq.md)
 
+## Acknowledgements
+
+Huge thanks to the original [Happy](https://github.com/slopus/happy) author and community for the inspiration and foundation.
+
 ## Build from source
 
 ```bash
