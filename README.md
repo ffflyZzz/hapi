@@ -18,8 +18,8 @@ Run Claude Code / Codex / Gemini sessions locally and control them remotely thro
 ## Getting Started
 
 ```bash
-npx @twsxtd/hapi server # start the server locally
-npx @twsxtd/hapi # run claude code 
+npx @aiflyzx/hapi server # start the server locally
+npx @aiflyzx/hapi # run claude code 
 ```
 
 Open `http://<server-ip>:3006` and login with the token, if you need to access it remotely, see [Remote access](docs/guide/installation.md#remote-access)

@@ -9,13 +9,7 @@ Install the HAPI CLI and set up the server.
 ## Install the CLI
 
 ```bash
-npm install -g @twsxtd/hapi
-```
-
-Or with Homebrew:
-
-```bash
-brew install tiann/tap/hapi
+npm install -g @aiflyzx/hapi
 ```
 
 ## Other install options
@@ -24,14 +18,14 @@ brew install tiann/tap/hapi
 <summary>npx (no install)</summary>
 
 ```bash
-npx @twsxtd/hapi
+npx @aiflyzx/hapi
 ```
 </details>
 
 <details>
 <summary>Prebuilt binary</summary>
 
-Download the latest release from [GitHub Releases](https://github.com/tiann/hapi/releases).
+Download the latest release from [GitHub Releases](https://github.com/ffflyZzz/hapi/releases).
 
 ```bash
 xattr -d com.apple.quarantine ./hapi
@@ -44,7 +38,7 @@ sudo mv ./hapi /usr/local/bin/
 <summary>Build from source</summary>
 
 ```bash
-git clone https://github.com/tiann/hapi.git
+git clone https://github.com/ffflyZzz/hapi.git
 cd hapi
 bun install
 bun build:single-exe

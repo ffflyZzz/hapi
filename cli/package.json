@@ -1,15 +1,15 @@
 {
-  "name": "@twsxtd/hapi",
+  "name": "@aiflyzx/hapi",
   "version": "0.7.3",
   "description": "App for agentic coding - access coding agent anywhere",
   "author": "Kirill Dubovitskiy & weishu",
   "license": "AGPL-3.0-only",
   "type": "module",
-  "homepage": "https://github.com/tiann/hapi",
-  "bugs": "https://github.com/tiann/hapi/issues",
+  "homepage": "https://github.com/ffflyZzz/hapi",
+  "bugs": "https://github.com/ffflyZzz/hapi/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tiann/hapi.git",
+    "url": "git+https://github.com/ffflyZzz/hapi.git",
     "directory": "cli"
   },
   "bin": {
@@ -26,11 +26,11 @@
     }
   },
   "optionalDependencies": {
-    "@twsxtd/hapi-darwin-arm64": "0.7.3",
-    "@twsxtd/hapi-darwin-x64": "0.7.3",
-    "@twsxtd/hapi-linux-arm64": "0.7.3",
-    "@twsxtd/hapi-linux-x64": "0.7.3",
-    "@twsxtd/hapi-win32-x64": "0.7.3"
+    "@aiflyzx/hapi-darwin-arm64": "0.7.3",
+    "@aiflyzx/hapi-darwin-x64": "0.7.3",
+    "@aiflyzx/hapi-linux-arm64": "0.7.3",
+    "@aiflyzx/hapi-linux-x64": "0.7.3",
+    "@aiflyzx/hapi-win32-x64": "0.7.3"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -41,7 +41,6 @@
     "prepare-npm-packages": "bun run scripts/prepare-npm-packages.ts",
     "prepack": "bun run prepare-npm-packages",
     "tools:unpack": "bun run scripts/unpack-tools.ts",
-    "update-homebrew-formula": "bun run scripts/update-homebrew-formula.ts",
     "test": "bun run tools:unpack && vitest run",
     "test:win": "vitest run",
     "dev": "bun src/index.ts",
