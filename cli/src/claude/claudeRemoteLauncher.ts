@@ -25,6 +25,72 @@ interface PermissionsField {
     allowedTools?: string[];
 }
 
+function safeJsonStringify(value: unknown): string {
+    try {
+        return JSON.stringify(value);
+    } catch {
+        return String(value);
+    }
+}
+
+function toSingleLine(value: string, maxLength: number = 240): string {
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    if (!normalized) {
+        return 'Unknown error';
+    }
+    if (normalized.length <= maxLength) {
+        return normalized;
+    }
+    return `${normalized.slice(0, maxLength)}...`;
+}
+
+function formatLaunchError(error: unknown): { summary: string; details: Record<string, unknown> } {
+    if (error instanceof Error) {
+        const cause = error.cause instanceof Error
+            ? { name: error.cause.name, message: error.cause.message, stack: error.cause.stack }
+            : error.cause;
+
+        return {
+            summary: toSingleLine(error.message || error.name),
+            details: {
+                name: error.name,
+                message: error.message,
+                stack: error.stack,
+                cause
+            }
+        };
+    }
+
+    if (typeof error === 'string') {
+        return {
+            summary: toSingleLine(error),
+            details: { message: error }
+        };
+    }
+
+    if (error && typeof error === 'object') {
+        const record = error as Record<string, unknown>;
+        const message = typeof record.message === 'string'
+            ? record.message
+            : safeJsonStringify(error);
+
+        return {
+            summary: toSingleLine(message),
+            details: {
+                name: typeof record.name === 'string' ? record.name : undefined,
+                message: typeof record.message === 'string' ? record.message : undefined,
+                code: typeof record.code === 'string' || typeof record.code === 'number' ? record.code : undefined,
+                raw: safeJsonStringify(error)
+            }
+        };
+    }
+
+    return {
+        summary: toSingleLine(String(error)),
+        details: { value: String(error) }
+    };
+}
+
 class ClaudeRemoteLauncher extends RemoteLauncherBase {
     private readonly session: Session;
     private abortController: AbortController | null = null;
@@ -361,9 +427,13 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                         session.client.sendSessionEvent({ type: 'message', message: 'Aborted by user' });
                     }
                 } catch (e) {
-                    logger.debug('[remote]: launch error', e);
+                    const formattedError = formatLaunchError(e);
+                    logger.debug('[remote]: launch error', formattedError.details);
                     if (!this.exitReason) {
-                        session.client.sendSessionEvent({ type: 'message', message: 'Process exited unexpectedly' });
+                        session.client.sendSessionEvent({
+                            type: 'message',
+                            message: `Process exited unexpectedly: ${formattedError.summary}`
+                        });
                         continue;
                     }
                 } finally {

@@ -16,6 +16,7 @@ import { bootstrapSession } from '@/agent/sessionFactory';
 import { createModeChangeHandler, createRunnerLifecycle, setControlledByUser } from '@/agent/runnerLifecycle';
 import { isModelModeAllowedForFlavor, isPermissionModeAllowedForFlavor } from '@hapi/protocol';
 import { ModelModeSchema, PermissionModeSchema } from '@hapi/protocol/schemas';
+import { normalizePermissionModeForRuntime } from '@/claude/utils/permissionModeGuard';
 
 export interface StartOptions {
     model?: string
@@ -137,8 +138,27 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
         disallowedTools: mode.disallowedTools
     }));
 
+    const isRootUser = typeof process.getuid === 'function' && process.getuid() === 0;
+    let rootBypassWarningSent = false;
+    const normalizePermissionMode = (
+        mode: PermissionMode,
+        source: 'startup' | 'session-runtime' | 'rpc'
+    ): PermissionMode => {
+        const normalized = normalizePermissionModeForRuntime(mode, isRootUser);
+        if (!normalized.warning) {
+            return normalized.mode;
+        }
+
+        logger.warn(`[loop] ${normalized.warning} source=${source}`);
+        if (!rootBypassWarningSent) {
+            rootBypassWarningSent = true;
+            session.sendSessionEvent({ type: 'message', message: normalized.warning });
+        }
+        return normalized.mode;
+    };
+
     // Forward messages to the queue
-    let currentPermissionMode: PermissionMode = options.permissionMode ?? 'default';
+    let currentPermissionMode: PermissionMode = normalizePermissionMode(options.permissionMode ?? 'default', 'startup');
     let currentModel = options.model; // Track current model state
     let currentModelMode: SessionModelMode = currentModel === 'sonnet' || currentModel === 'opus' ? currentModel : 'default';
     let currentFallbackModel: string | undefined = undefined; // Track current fallback model
@@ -159,7 +179,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
     session.onUserMessage((message) => {
         const sessionPermissionMode = currentSessionRef.current?.getPermissionMode();
         if (sessionPermissionMode && isPermissionModeAllowedForFlavor(sessionPermissionMode, 'claude')) {
-            currentPermissionMode = sessionPermissionMode as PermissionMode;
+            currentPermissionMode = normalizePermissionMode(sessionPermissionMode as PermissionMode, 'session-runtime');
         }
         const messagePermissionMode = currentPermissionMode;
         const messageModel = currentModel;
@@ -287,7 +307,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
         const config = payload as { permissionMode?: unknown; modelMode?: unknown };
 
         if (config.permissionMode !== undefined) {
-            currentPermissionMode = resolvePermissionMode(config.permissionMode);
+            currentPermissionMode = normalizePermissionMode(resolvePermissionMode(config.permissionMode), 'rpc');
         }
 
         if (config.modelMode !== undefined) {
@@ -306,7 +326,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
         await loop({
             path: workingDirectory,
             model: options.model,
-            permissionMode: options.permissionMode,
+            permissionMode: currentPermissionMode,
             startingMode,
             messageQueue,
             api,
