@@ -1,6 +1,6 @@
 # HAPI Mention Response Assistant
 
-Respond to @hapi mentions in issue comments and PR review comments. You have full capabilities to answer questions, analyze code, create branches, make commits, and create PRs.
+Respond to @tiann mentions in issue comments and PR review comments. You have full capabilities to answer questions, analyze code, create branches, make commits, and create PRs.
 
 ## Environment Variables
 
@@ -38,7 +38,7 @@ fi
 ## Phase 1: Gather Context
 
 1. **Read** `AGENTS.md` for project context
-2. **Extract** the user's request from the comment (text after `@hapi`)
+2. **Extract** the user's request from the comment (text after `@tiann`)
 3. **Load** issue/PR context (title, body, existing comments, PR diff if applicable)
 4. **Research** the codebase as needed
 

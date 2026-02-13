@@ -9,7 +9,7 @@ import { parseSpecialCommand } from '@/parsers/specialCommands';
 import { getEnvironmentInfo } from '@/ui/doctor';
 import { startHappyServer } from '@/claude/utils/startHappyServer';
 import { startHookServer } from '@/claude/utils/startHookServer';
-import { generateHookSettingsFile, cleanupHookSettingsFile } from '@/claude/utils/generateHookSettings';
+import { generateHookSettingsFile, cleanupHookSettingsFile } from '@/modules/common/hooks/generateHookSettings';
 import { registerKillSessionHandler } from './registerKillSessionHandler';
 import type { Session } from './session';
 import { bootstrapSession } from '@/agent/sessionFactory';
@@ -17,15 +17,16 @@ import { createModeChangeHandler, createRunnerLifecycle, setControlledByUser } f
 import { isModelModeAllowedForFlavor, isPermissionModeAllowedForFlavor } from '@hapi/protocol';
 import { ModelModeSchema, PermissionModeSchema } from '@hapi/protocol/schemas';
 import { normalizePermissionModeForRuntime } from '@/claude/utils/permissionModeGuard';
+import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
 
 export interface StartOptions {
     model?: string
     permissionMode?: PermissionMode
     startingMode?: 'local' | 'remote'
-    shouldStartDaemon?: boolean
+    shouldStartRunner?: boolean
     claudeEnvVars?: Record<string, string>
     claudeArgs?: string[]
-    startedBy?: 'daemon' | 'terminal'
+    startedBy?: 'runner' | 'terminal'
 }
 
 export async function runClaude(options: StartOptions = {}): Promise<void> {
@@ -36,12 +37,12 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
     logger.debugLargeJson('[START] HAPI process started', getEnvironmentInfo());
     logger.debug(`[START] Options: startedBy=${startedBy}, startingMode=${options.startingMode}`);
 
-    // Validate daemon spawn requirements
-    if (startedBy === 'daemon' && options.startingMode === 'local') {
-        logger.debug('Daemon spawn requested with local mode - forcing remote mode');
+    // Validate runner spawn requirements
+    if (startedBy === 'runner' && options.startingMode === 'local') {
+        logger.debug('Runner spawn requested with local mode - forcing remote mode');
         options.startingMode = 'remote';
         // TODO: Eventually we should error here instead of silently switching
-        // throw new Error('Daemon-spawned sessions cannot use local/interactive mode');
+        // throw new Error('Runner-spawned sessions cannot use local/interactive mode');
     }
 
     const initialState: AgentState = {};
@@ -101,7 +102,10 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
     });
     logger.debug(`[START] Hook server started on port ${hookServer.port}`);
 
-    const hookSettingsPath = generateHookSettingsFile(hookServer.port, hookServer.token);
+    const hookSettingsPath = generateHookSettingsFile(hookServer.port, hookServer.token, {
+        filenamePrefix: 'session-hook',
+        logLabel: 'generateHookSettings'
+    });
     logger.debug(`[START] Generated hook settings file: ${hookSettingsPath}`);
 
     // Print log file path
@@ -116,7 +120,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
         onAfterClose: () => {
             happyServer.stop();
             hookServer.stop();
-            cleanupHookSettingsFile(hookSettingsPath);
+            cleanupHookSettingsFile(hookSettingsPath, 'generateHookSettings');
         }
     });
 
@@ -124,7 +128,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
     registerKillSessionHandler(session.rpcHandlerManager, lifecycle.cleanupAndExit);
 
     // Set initial agent state
-    const startingMode = options.startingMode ?? (startedBy === 'daemon' ? 'remote' : 'local');
+    const startingMode = options.startingMode ?? (startedBy === 'runner' ? 'remote' : 'local');
     setControlledByUser(session, startingMode);
 
     // Import MessageQueue2 and create message queue
@@ -159,8 +163,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
 
     // Forward messages to the queue
     let currentPermissionMode: PermissionMode = normalizePermissionMode(options.permissionMode ?? 'default', 'startup');
-    let currentModel = options.model; // Track current model state
-    let currentModelMode: SessionModelMode = currentModel === 'sonnet' || currentModel === 'opus' ? currentModel : 'default';
+    let currentModelMode: SessionModelMode = options.model === 'sonnet' || options.model === 'opus' ? options.model : 'default';
     let currentFallbackModel: string | undefined = undefined; // Track current fallback model
     let currentCustomSystemPrompt: string | undefined = undefined; // Track current custom system prompt
     let currentAppendSystemPrompt: string | undefined = undefined; // Track current append system prompt
@@ -182,7 +185,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
             currentPermissionMode = normalizePermissionMode(sessionPermissionMode as PermissionMode, 'session-runtime');
         }
         const messagePermissionMode = currentPermissionMode;
-        const messageModel = currentModel;
+        const messageModel = currentModelMode === 'default' ? undefined : currentModelMode;
         logger.debug(`[loop] User message received with permission mode: ${currentPermissionMode}, model: ${currentModelMode}`);
 
         // Resolve custom system prompt - use message.meta.customSystemPrompt if provided, otherwise use current
@@ -238,6 +241,9 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
         // Check for special commands before processing
         const specialCommand = parseSpecialCommand(message.content.text);
 
+        // Format message text with attachments for Claude
+        const formattedText = formatMessageWithAttachments(message.content.text, message.content.attachments);
+
         if (specialCommand.type === 'compact') {
             logger.debug('[start] Detected /compact command');
             const enhancedMode: EnhancedMode = {
@@ -249,7 +255,9 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
                 allowedTools: messageAllowedTools,
                 disallowedTools: messageDisallowedTools
             };
-            messageQueue.pushIsolateAndClear(specialCommand.originalMessage || message.content.text, enhancedMode);
+            // Use raw text only, ignore attachments for special commands
+            const commandText = specialCommand.originalMessage || message.content.text;
+            messageQueue.pushIsolateAndClear(commandText, enhancedMode);
             logger.debugLargeJson('[start] /compact command pushed to queue:', message);
             return;
         }
@@ -265,8 +273,10 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
                 allowedTools: messageAllowedTools,
                 disallowedTools: messageDisallowedTools
             };
-            messageQueue.pushIsolateAndClear(specialCommand.originalMessage || message.content.text, enhancedMode);
-            logger.debugLargeJson('[start] /compact command pushed to queue:', message);
+            // Use raw text only, ignore attachments for special commands
+            const commandText = specialCommand.originalMessage || message.content.text;
+            messageQueue.pushIsolateAndClear(commandText, enhancedMode);
+            logger.debugLargeJson('[start] /clear command pushed to queue:', message);
             return;
         }
 
@@ -280,7 +290,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
             allowedTools: messageAllowedTools,
             disallowedTools: messageDisallowedTools
         };
-        messageQueue.push(message.content.text, enhancedMode);
+        messageQueue.push(formattedText, enhancedMode);
         logger.debugLargeJson('User message pushed to queue:', message)
     });
 
@@ -313,7 +323,6 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
         if (config.modelMode !== undefined) {
             const resolvedModelMode = resolveModelMode(config.modelMode);
             currentModelMode = resolvedModelMode;
-            currentModel = resolvedModelMode === 'default' ? undefined : resolvedModelMode;
         }
 
         syncSessionModes();

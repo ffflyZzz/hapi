@@ -8,6 +8,7 @@ import type {
 
 export type {
     AgentState,
+    AttachmentMetadata,
     ModelMode,
     PermissionMode,
     Session,
@@ -98,9 +99,33 @@ export type FileSearchResponse = {
     error?: string
 }
 
+export type DirectoryEntry = {
+    name: string
+    type: 'file' | 'directory' | 'other'
+    size?: number
+    modified?: number
+}
+
+export type ListDirectoryResponse = {
+    success: boolean
+    entries?: DirectoryEntry[]
+    error?: string
+}
+
 export type FileReadResponse = {
     success: boolean
     content?: string
+    error?: string
+}
+
+export type UploadFileResponse = {
+    success: boolean
+    path?: string
+    error?: string
+}
+
+export type DeleteUploadResponse = {
+    success: boolean
     error?: string
 }
 
@@ -126,13 +151,25 @@ export type GitStatusFiles = {
 export type SlashCommand = {
     name: string
     description?: string
-    source: 'builtin' | 'user'
+    source: 'builtin' | 'user' | 'plugin'
     content?: string  // Expanded content for Codex user prompts
+    pluginName?: string
 }
 
 export type SlashCommandsResponse = {
     success: boolean
     commands?: SlashCommand[]
+    error?: string
+}
+
+export type SkillSummary = {
+    name: string
+    description?: string
+}
+
+export type SkillsResponse = {
+    success: boolean
+    skills?: SkillSummary[]
     error?: string
 }
 

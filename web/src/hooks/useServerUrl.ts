@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 
-const SERVER_URL_KEY = 'hapi_server_url'
+const HUB_URL_KEY = 'hapi_hub_url'
 
 export type ServerUrlResult =
     | { ok: true; value: string }
@@ -9,7 +9,7 @@ export type ServerUrlResult =
 export function normalizeServerUrl(input: string): ServerUrlResult {
     const trimmed = input.trim()
     if (!trimmed) {
-        return { ok: false, error: 'Enter a server URL like https://example.com' }
+        return { ok: false, error: 'Enter a hub URL like https://example.com' }
     }
 
     let parsed: URL
@@ -20,21 +20,32 @@ export function normalizeServerUrl(input: string): ServerUrlResult {
     }
 
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        return { ok: false, error: 'Server URL must start with http:// or https://' }
+        return { ok: false, error: 'Hub URL must start with http:// or https://' }
     }
 
     return { ok: true, value: parsed.origin }
 }
 
+function getServerFromUrlParams(): string | null {
+    if (typeof window === 'undefined') return null
+    const query = new URLSearchParams(window.location.search)
+    const hub = query.get('hub')
+    if (hub) {
+        const normalized = normalizeServerUrl(hub)
+        return normalized.ok ? normalized.value : null
+    }
+    return null
+}
+
 function readStoredServerUrl(): string | null {
     try {
-        const stored = localStorage.getItem(SERVER_URL_KEY)
+        const stored = localStorage.getItem(HUB_URL_KEY)
         if (!stored) {
             return null
         }
         const normalized = normalizeServerUrl(stored)
         if (!normalized.ok) {
-            localStorage.removeItem(SERVER_URL_KEY)
+            localStorage.removeItem(HUB_URL_KEY)
             return null
         }
         return normalized.value
@@ -45,7 +56,7 @@ function readStoredServerUrl(): string | null {
 
 function writeStoredServerUrl(value: string): void {
     try {
-        localStorage.setItem(SERVER_URL_KEY, value)
+        localStorage.setItem(HUB_URL_KEY, value)
     } catch {
         // Ignore storage errors
     }
@@ -53,7 +64,7 @@ function writeStoredServerUrl(value: string): void {
 
 function clearStoredServerUrl(): void {
     try {
-        localStorage.removeItem(SERVER_URL_KEY)
+        localStorage.removeItem(HUB_URL_KEY)
     } catch {
         // Ignore storage errors
     }
@@ -65,7 +76,15 @@ export function useServerUrl(): {
     setServerUrl: (input: string) => ServerUrlResult
     clearServerUrl: () => void
 } {
-    const [serverUrl, setServerUrlState] = useState<string | null>(() => readStoredServerUrl())
+    const [serverUrl, setServerUrlState] = useState<string | null>(() => {
+        // Priority: URL params > localStorage
+        const fromUrl = getServerFromUrlParams()
+        if (fromUrl) {
+            writeStoredServerUrl(fromUrl) // Save to localStorage for refresh
+            return fromUrl
+        }
+        return readStoredServerUrl()
+    })
 
     const fallbackOrigin = typeof window !== 'undefined' ? window.location.origin : ''
     const baseUrl = useMemo(() => serverUrl ?? fallbackOrigin, [serverUrl, fallbackOrigin])

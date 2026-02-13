@@ -1,85 +1,100 @@
-import type { ThreadStartParams, TurnStartParams } from '../appServerTypes';
 import type { EnhancedMode } from '../loop';
 import type { CodexCliOverrides } from './codexCliOverrides';
+import type { McpServersConfig } from './buildHapiMcpBridge';
 import { codexSystemPrompt } from './systemPrompt';
+import type {
+    ApprovalPolicy,
+    SandboxMode,
+    SandboxPolicy,
+    ThreadStartParams,
+    TurnStartParams
+} from '../appServerTypes';
 
-type ResolvedRuntimeConfig = {
-    approvalPolicy: NonNullable<ThreadStartParams['approvalPolicy']>;
-    sandbox: NonNullable<ThreadStartParams['sandbox']>;
-};
-
-function resolveByPermissionMode(mode: EnhancedMode): ResolvedRuntimeConfig {
+function resolveApprovalPolicy(mode: EnhancedMode): ApprovalPolicy {
     switch (mode.permissionMode) {
-        case 'default':
-            return {
-                approvalPolicy: 'untrusted',
-                sandbox: 'workspace-write'
-            };
-        case 'read-only':
-            return {
-                approvalPolicy: 'never',
-                sandbox: 'read-only'
-            };
-        case 'safe-yolo':
-            return {
-                approvalPolicy: 'on-failure',
-                sandbox: 'workspace-write'
-            };
-        case 'yolo':
-            return {
-                approvalPolicy: 'on-failure',
-                sandbox: 'danger-full-access'
-            };
-        default:
+        case 'default': return 'untrusted';
+        case 'read-only': return 'never';
+        case 'safe-yolo': return 'on-failure';
+        case 'yolo': return 'on-failure';
+        default: {
             throw new Error(`Unknown permission mode: ${mode.permissionMode}`);
+        }
     }
 }
 
-function resolveRuntimeConfig(
-    mode: EnhancedMode,
-    cliOverrides?: CodexCliOverrides
-): ResolvedRuntimeConfig {
-    const defaults = resolveByPermissionMode(mode);
-
-    // Keep behavior consistent with MCP mode: only default mode accepts CLI overrides.
-    if (mode.permissionMode !== 'default') {
-        return defaults;
+function resolveSandbox(mode: EnhancedMode): SandboxMode {
+    switch (mode.permissionMode) {
+        case 'default': return 'workspace-write';
+        case 'read-only': return 'read-only';
+        case 'safe-yolo': return 'workspace-write';
+        case 'yolo': return 'danger-full-access';
+        default: {
+            throw new Error(`Unknown permission mode: ${mode.permissionMode}`);
+        }
     }
-
-    return {
-        approvalPolicy: cliOverrides?.approvalPolicy ?? defaults.approvalPolicy,
-        sandbox: cliOverrides?.sandbox ?? defaults.sandbox
-    };
 }
 
-function toSandboxPolicy(
-    sandbox: NonNullable<ThreadStartParams['sandbox']>
-): TurnStartParams['sandboxPolicy'] {
-    switch (sandbox) {
-        case 'danger-full-access':
-            return { type: 'dangerFullAccess' };
+function resolveSandboxPolicy(mode: EnhancedMode): SandboxPolicy {
+    switch (mode.permissionMode) {
+        case 'default': return { type: 'workspaceWrite' };
+        case 'read-only': return { type: 'readOnly' };
+        case 'safe-yolo': return { type: 'workspaceWrite' };
+        case 'yolo': return { type: 'dangerFullAccess' };
+        default: {
+            throw new Error(`Unknown permission mode: ${mode.permissionMode}`);
+        }
+    }
+}
+
+function resolveSandboxPolicyOverride(value: CodexCliOverrides['sandbox'] | undefined): SandboxPolicy | undefined {
+    switch (value) {
         case 'read-only':
             return { type: 'readOnly' };
         case 'workspace-write':
             return { type: 'workspaceWrite' };
+        case 'danger-full-access':
+            return { type: 'dangerFullAccess' };
         default:
-            throw new Error(`Unknown sandbox mode: ${sandbox}`);
+            return undefined;
     }
+}
+
+function buildMcpServerConfig(mcpServers: McpServersConfig): Record<string, unknown> {
+    const config: Record<string, unknown> = {};
+
+    for (const [name, server] of Object.entries(mcpServers)) {
+        config[`mcp_servers.${name}`] = {
+            command: server.command,
+            args: server.args
+        };
+    }
+
+    return config;
 }
 
 export function buildThreadStartParams(args: {
     mode: EnhancedMode;
-    mcpServers: Record<string, { command: string; args: string[] }>;
+    mcpServers: McpServersConfig;
     cliOverrides?: CodexCliOverrides;
+    baseInstructions?: string;
+    developerInstructions?: string;
 }): ThreadStartParams {
-    const resolved = resolveRuntimeConfig(args.mode, args.cliOverrides);
+    const approvalPolicy = resolveApprovalPolicy(args.mode);
+    const sandbox = resolveSandbox(args.mode);
+    const allowCliOverrides = args.mode.permissionMode === 'default';
+    const cliOverrides = allowCliOverrides ? args.cliOverrides : undefined;
+    const resolvedApprovalPolicy = cliOverrides?.approvalPolicy ?? approvalPolicy;
+    const resolvedSandbox = cliOverrides?.sandbox ?? sandbox;
+
+    const config = buildMcpServerConfig(args.mcpServers);
+    const baseInstructions = args.baseInstructions ?? codexSystemPrompt;
+
     const params: ThreadStartParams = {
-        approvalPolicy: resolved.approvalPolicy,
-        sandbox: resolved.sandbox,
-        config: {
-            mcp_servers: args.mcpServers
-        },
-        developerInstructions: codexSystemPrompt
+        approvalPolicy: resolvedApprovalPolicy,
+        sandbox: resolvedSandbox,
+        baseInstructions,
+        ...(args.developerInstructions ? { developerInstructions: args.developerInstructions } : {}),
+        ...(Object.keys(config).length > 0 ? { config } : {})
     };
 
     if (args.mode.model) {
@@ -92,24 +107,44 @@ export function buildThreadStartParams(args: {
 export function buildTurnStartParams(args: {
     threadId: string;
     message: string;
-    mode: EnhancedMode;
+    mode?: EnhancedMode;
     cliOverrides?: CodexCliOverrides;
+    overrides?: {
+        approvalPolicy?: TurnStartParams['approvalPolicy'];
+        sandboxPolicy?: TurnStartParams['sandboxPolicy'];
+        model?: string;
+    };
 }): TurnStartParams {
-    const resolved = resolveRuntimeConfig(args.mode, args.cliOverrides);
     const params: TurnStartParams = {
         threadId: args.threadId,
-        input: [
-            {
-                type: 'text',
-                text: args.message
-            }
-        ],
-        approvalPolicy: resolved.approvalPolicy,
-        sandboxPolicy: toSandboxPolicy(resolved.sandbox)
+        input: [{ type: 'text', text: args.message }]
     };
 
-    if (args.mode.model) {
-        params.model = args.mode.model;
+    const allowCliOverrides = args.mode?.permissionMode === 'default';
+    const cliOverrides = allowCliOverrides ? args.cliOverrides : undefined;
+    const approvalPolicy = args.overrides?.approvalPolicy
+        ?? cliOverrides?.approvalPolicy
+        ?? (args.mode ? resolveApprovalPolicy(args.mode) : undefined);
+    if (approvalPolicy) {
+        params.approvalPolicy = approvalPolicy;
+    }
+
+    const sandboxPolicy = args.overrides?.sandboxPolicy
+        ?? resolveSandboxPolicyOverride(cliOverrides?.sandbox)
+        ?? (args.mode ? resolveSandboxPolicy(args.mode) : undefined);
+    if (sandboxPolicy) {
+        params.sandboxPolicy = sandboxPolicy;
+    }
+
+    const collaborationMode = args.mode?.collaborationMode;
+    const model = args.overrides?.model ?? args.mode?.model;
+    if (collaborationMode) {
+        const settings = model ? { model } : undefined;
+        params.collaborationMode = settings
+            ? { mode: collaborationMode, settings }
+            : { mode: collaborationMode };
+    } else if (model) {
+        params.model = model;
     }
 
     return params;

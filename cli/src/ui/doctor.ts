@@ -2,15 +2,15 @@
  * Doctor command implementation
  * 
  * Provides comprehensive diagnostics and troubleshooting information
- * for hapi CLI including configuration, daemon status, logs, and links
+ * for hapi CLI including configuration, runner status, logs, and links
  */
 
 import chalk from 'chalk'
 import { configuration } from '@/configuration'
 import { readSettings } from '@/persistence'
-import { checkIfDaemonRunningAndCleanupStaleState } from '@/daemon/controlClient'
-import { findRunawayHappyProcesses, findAllHappyProcesses } from '@/daemon/doctor'
-import { readDaemonState } from '@/persistence'
+import { checkIfRunnerRunningAndCleanupStaleState } from '@/runner/controlClient'
+import { findRunawayHappyProcesses, findAllHappyProcesses } from '@/runner/doctor'
+import { readRunnerState } from '@/persistence'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -24,7 +24,7 @@ export function getEnvironmentInfo(): Record<string, any> {
     return {
         PWD: process.env.PWD,
         HAPI_HOME: process.env.HAPI_HOME,
-        HAPI_SERVER_URL: process.env.HAPI_SERVER_URL,
+        HAPI_API_URL: process.env.HAPI_API_URL,
         HAPI_PROJECT_ROOT: process.env.HAPI_PROJECT_ROOT,
         CLI_API_TOKEN_SET: Boolean(process.env.CLI_API_TOKEN),
         DANGEROUSLY_LOG_TO_SERVER_FOR_AI_AUTO_DEBUGGING: process.env.DANGEROUSLY_LOG_TO_SERVER_FOR_AI_AUTO_DEBUGGING,
@@ -33,7 +33,7 @@ export function getEnvironmentInfo(): Record<string, any> {
         workingDirectory: process.cwd(),
         processArgv: process.argv,
         happyDir: configuration?.happyHomeDir,
-        serverUrl: configuration?.serverUrl,
+        apiUrl: configuration?.apiUrl,
         logsDir: configuration?.logsDir,
         processPid: process.pid,
         nodeVersion: process.version,
@@ -66,13 +66,13 @@ function getLogFiles(logDir: string): { file: string, path: string, modified: Da
 }
 
 /**
- * Run doctor command specifically for daemon diagnostics
+ * Run doctor command specifically for runner diagnostics
  */
-export async function runDoctorDaemon(): Promise<void> {
-    return runDoctorCommand('daemon');
+export async function runDoctorRunner(): Promise<void> {
+    return runDoctorCommand('runner');
 }
 
-export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void> {
+export async function runDoctorCommand(filter?: 'all' | 'runner'): Promise<void> {
     // Default to 'all' if no filter specified
     if (!filter) {
         filter = 'all';
@@ -80,7 +80,7 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
     
     console.log(chalk.bold.cyan('\n🩺 hapi CLI Doctor\n'));
 
-    // For 'all' filter, show everything. For 'daemon', only show daemon-related info
+    // For 'all' filter, show everything. For 'runner', only show runner-related info
     if (filter === 'all') {
         // Version and basic info
         console.log(chalk.bold('📋 Basic Information'));
@@ -89,8 +89,8 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
         console.log(`Node.js Version: ${chalk.green(process.version)}`);
         console.log('');
 
-        // Daemon spawn diagnostics
-        console.log(chalk.bold('🔧 Daemon Spawn Diagnostics'));
+        // Runner spawn diagnostics
+        console.log(chalk.bold('🔧 Runner Spawn Diagnostics'));
         const projectRoot = projectPath();
         const cliEntrypoint = join(projectRoot, 'src', 'index.ts');
 
@@ -107,14 +107,14 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
         // Configuration
         console.log(chalk.bold('⚙️  Configuration'));
         console.log(`hapi Home: ${chalk.blue(configuration.happyHomeDir)}`);
-        console.log(`Bot URL: ${chalk.blue(configuration.serverUrl)}`);
+        console.log(`Bot URL: ${chalk.blue(configuration.apiUrl)}`);
         console.log(`Logs Dir: ${chalk.blue(configuration.logsDir)}`);
 
         // Environment
         console.log(chalk.bold('\n🌍 Environment Variables'));
         const env = getEnvironmentInfo();
         console.log(`HAPI_HOME: ${env.HAPI_HOME ? chalk.green(env.HAPI_HOME) : chalk.gray('not set')}`);
-        console.log(`HAPI_SERVER_URL: ${env.HAPI_SERVER_URL ? chalk.green(env.HAPI_SERVER_URL) : chalk.gray('not set')}`);
+        console.log(`HAPI_API_URL: ${env.HAPI_API_URL ? chalk.green(env.HAPI_API_URL) : chalk.gray('not set')}`);
         console.log(`CLI_API_TOKEN: ${env.CLI_API_TOKEN_SET ? chalk.green('set') : chalk.gray('not set')}`);
         console.log(`DANGEROUSLY_LOG_TO_SERVER: ${env.DANGEROUSLY_LOG_TO_SERVER_FOR_AI_AUTO_DEBUGGING ? chalk.yellow('ENABLED') : chalk.gray('not set')}`);
         console.log(`DEBUG: ${env.DEBUG ? chalk.green(env.DEBUG) : chalk.gray('not set')}`);
@@ -149,14 +149,14 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
 
     }
 
-    // Daemon status - shown for both 'all' and 'daemon' filters
-    console.log(chalk.bold('\n🤖 Daemon Status'));
+    // Runner status - shown for both 'all' and 'runner' filters
+    console.log(chalk.bold('\n🤖 Runner Status'));
     try {
-        const isRunning = await checkIfDaemonRunningAndCleanupStaleState();
-        const state = await readDaemonState();
+        const isRunning = await checkIfRunnerRunningAndCleanupStaleState();
+        const state = await readRunnerState();
 
         if (isRunning && state) {
-            console.log(chalk.green('✓ Daemon is running'));
+            console.log(chalk.green('✓ Runner is running'));
             console.log(`  PID: ${state.pid}`);
             console.log(`  Started: ${new Date(state.startTime).toLocaleString()}`);
             console.log(`  CLI Version: ${state.startedWithCliVersion}`);
@@ -164,15 +164,15 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
                 console.log(`  HTTP Port: ${state.httpPort}`);
             }
         } else if (state && !isRunning) {
-            console.log(chalk.yellow('⚠️  Daemon state exists but process not running (stale)'));
+            console.log(chalk.yellow('⚠️  Runner state exists but process not running (stale)'));
         } else {
-            console.log(chalk.red('❌ Daemon is not running'));
+            console.log(chalk.red('❌ Runner is not running'));
         }
 
-        // Show daemon state file
+        // Show runner state file
         if (state) {
-            console.log(chalk.bold('\n📄 Daemon State:'));
-            console.log(chalk.blue(`Location: ${configuration.daemonStateFile}`));
+            console.log(chalk.bold('\n📄 Runner State:'));
+            console.log(chalk.blue(`Location: ${configuration.runnerStateFile}`));
             console.log(chalk.gray(JSON.stringify(state, null, 2)));
         }
 
@@ -192,12 +192,12 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
             Object.entries(grouped).forEach(([type, processes]) => {
                 const typeLabels: Record<string, string> = {
                     'current': '📍 Current Process',
-                    'daemon': '🤖 Daemon',
-                    'daemon-version-check': '🔍 Daemon Version Check (stuck)',
-                    'daemon-spawned-session': '🔗 Daemon-Spawned Sessions',
+                    'runner': '🤖 Runner',
+                    'runner-version-check': '🔍 Runner Version Check (stuck)',
+                    'runner-spawned-session': '🔗 Runner-Spawned Sessions',
                     'user-session': '👤 User Sessions',
-                    'dev-daemon': '🛠️  Dev Daemon',
-                    'dev-daemon-version-check': '🛠️  Dev Daemon Version Check (stuck)',
+                    'dev-runner': '🛠️  Dev Runner',
+                    'dev-runner-version-check': '🛠️  Dev Runner Version Check (stuck)',
                     'dev-session': '🛠️  Dev Sessions',
                     'dev-doctor': '🛠️  Dev Doctor',
                     'dev-related': '🛠️  Dev Related',
@@ -209,7 +209,7 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
                 processes.forEach(({ pid, command }) => {
                     const color = type === 'current' ? chalk.green :
                         type.startsWith('dev') ? chalk.cyan :
-                            type.includes('daemon') ? chalk.blue : chalk.gray;
+                            type.includes('runner') ? chalk.blue : chalk.gray;
                     console.log(`  ${color(`PID ${pid}`)}: ${chalk.gray(command)}`);
                 });
             });
@@ -222,7 +222,7 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
             console.log(chalk.gray('To clean up runaway processes: hapi doctor clean'));
         }
     } catch (error) {
-        console.log(chalk.red('❌ Error checking daemon status'));
+        console.log(chalk.red('❌ Error checking runner status'));
     }
 
     // Log files - only show for 'all' filter
@@ -233,9 +233,9 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
         const allLogs = getLogFiles(configuration.logsDir);
         
         if (allLogs.length > 0) {
-            // Separate daemon and regular logs
-            const daemonLogs = allLogs.filter(({ file }) => file.includes('daemon'));
-            const regularLogs = allLogs.filter(({ file }) => !file.includes('daemon'));
+            // Separate runner and regular logs
+            const runnerLogs = allLogs.filter(({ file }) => file.includes('runner'));
+            const regularLogs = allLogs.filter(({ file }) => !file.includes('runner'));
 
             // Show regular logs (max 10)
             if (regularLogs.length > 0) {
@@ -250,19 +250,19 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
                 }
             }
 
-            // Show daemon logs (max 5)
-            if (daemonLogs.length > 0) {
-                console.log(chalk.blue('\nDaemon Logs:'));
-                const daemonLogsToShow = daemonLogs.slice(0, 5);
-                daemonLogsToShow.forEach(({ file, path, modified }) => {
+            // Show runner logs (max 5)
+            if (runnerLogs.length > 0) {
+                console.log(chalk.blue('\nRunner Logs:'));
+                const runnerLogsToShow = runnerLogs.slice(0, 5);
+                runnerLogsToShow.forEach(({ file, path, modified }) => {
                     console.log(`  ${chalk.green(file)} - ${modified.toLocaleString()}`);
                     console.log(chalk.gray(`    ${path}`));
                 });
-                if (daemonLogs.length > 5) {
-                    console.log(chalk.gray(`  ... and ${daemonLogs.length - 5} more daemon log files`));
+                if (runnerLogs.length > 5) {
+                    console.log(chalk.gray(`  ... and ${runnerLogs.length - 5} more runner log files`));
                 }
             } else {
-                console.log(chalk.yellow('\nNo daemon log files found'));
+                console.log(chalk.yellow('\nNo runner log files found'));
             }
         } else {
             console.log(chalk.yellow('No log files found'));

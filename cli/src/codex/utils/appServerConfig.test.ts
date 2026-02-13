@@ -1,68 +1,97 @@
 import { describe, expect, it } from 'vitest';
 import { buildThreadStartParams, buildTurnStartParams } from './appServerConfig';
+import { codexSystemPrompt } from './systemPrompt';
 
 describe('appServerConfig', () => {
-    const mcpServers = {
-        hapi: { command: 'node', args: ['mcp'] }
-    };
+    const mcpServers = { hapi: { command: 'node', args: ['mcp'] } };
 
-    it('applies cli overrides in default mode', () => {
-        const threadParams = buildThreadStartParams({
+    it('applies CLI overrides when permission mode is default', () => {
+        const params = buildThreadStartParams({
             mode: { permissionMode: 'default' },
             mcpServers,
-            cliOverrides: {
-                approvalPolicy: 'never',
-                sandbox: 'danger-full-access'
-            }
+            cliOverrides: { sandbox: 'danger-full-access', approvalPolicy: 'never' }
         });
 
-        expect(threadParams.approvalPolicy).toBe('never');
-        expect(threadParams.sandbox).toBe('danger-full-access');
+        expect(params.sandbox).toBe('danger-full-access');
+        expect(params.approvalPolicy).toBe('never');
+        expect(params.baseInstructions).toBe(codexSystemPrompt);
+        expect(params.config).toEqual({
+            'mcp_servers.hapi': {
+                command: 'node',
+                args: ['mcp']
+            }
+        });
+    });
 
-        const turnParams = buildTurnStartParams({
+    it('ignores CLI overrides when permission mode is not default', () => {
+        const params = buildThreadStartParams({
+            mode: { permissionMode: 'yolo' },
+            mcpServers,
+            cliOverrides: { sandbox: 'read-only', approvalPolicy: 'never' }
+        });
+
+        expect(params.sandbox).toBe('danger-full-access');
+        expect(params.approvalPolicy).toBe('on-failure');
+    });
+
+    it('builds turn params with mode defaults', () => {
+        const params = buildTurnStartParams({
+            threadId: 'thread-1',
+            message: 'hello',
+            mode: { permissionMode: 'read-only', model: 'o3' }
+        });
+
+        expect(params.threadId).toBe('thread-1');
+        expect(params.input).toEqual([{ type: 'text', text: 'hello' }]);
+        expect(params.approvalPolicy).toBe('never');
+        expect(params.sandboxPolicy).toEqual({ type: 'readOnly' });
+        expect(params.model).toBe('o3');
+    });
+
+    it('puts collaboration mode in turn params with model settings', () => {
+        const params = buildTurnStartParams({
+            threadId: 'thread-1',
+            message: 'hello',
+            mode: { permissionMode: 'default', model: 'o3', collaborationMode: 'plan' }
+        });
+
+        expect(params.collaborationMode).toEqual({ mode: 'plan', settings: { model: 'o3' } });
+        expect(params.model).toBeUndefined();
+    });
+
+    it('applies CLI overrides for turns when permission mode is default', () => {
+        const params = buildTurnStartParams({
             threadId: 'thread-1',
             message: 'hello',
             mode: { permissionMode: 'default' },
-            cliOverrides: {
-                approvalPolicy: 'never',
-                sandbox: 'danger-full-access'
-            }
+            cliOverrides: { sandbox: 'danger-full-access', approvalPolicy: 'never' }
         });
-        expect(turnParams.approvalPolicy).toBe('never');
-        expect(turnParams.sandboxPolicy).toEqual({ type: 'dangerFullAccess' });
+
+        expect(params.approvalPolicy).toBe('never');
+        expect(params.sandboxPolicy).toEqual({ type: 'dangerFullAccess' });
     });
 
-    it('ignores cli overrides in non-default mode', () => {
-        const threadParams = buildThreadStartParams({
-            mode: { permissionMode: 'read-only' },
-            mcpServers,
-            cliOverrides: {
-                approvalPolicy: 'on-request',
-                sandbox: 'workspace-write'
-            }
+    it('ignores CLI overrides for turns when permission mode is not default', () => {
+        const params = buildTurnStartParams({
+            threadId: 'thread-1',
+            message: 'hello',
+            mode: { permissionMode: 'safe-yolo' },
+            cliOverrides: { sandbox: 'read-only', approvalPolicy: 'never' }
         });
 
-        expect(threadParams.approvalPolicy).toBe('never');
-        expect(threadParams.sandbox).toBe('read-only');
+        expect(params.approvalPolicy).toBe('on-failure');
+        expect(params.sandboxPolicy).toEqual({ type: 'workspaceWrite' });
     });
 
-    it('passes message, model and mcp config', () => {
-        const threadParams = buildThreadStartParams({
-            mode: { permissionMode: 'safe-yolo', model: 'o3' },
-            mcpServers
-        });
-        expect(threadParams.model).toBe('o3');
-        expect(threadParams.config).toEqual({ mcp_servers: mcpServers });
-
-        const turnParams = buildTurnStartParams({
-            threadId: 'thread-2',
-            message: '继续',
-            mode: { permissionMode: 'safe-yolo', model: 'o3' }
+    it('prefers turn overrides', () => {
+        const params = buildTurnStartParams({
+            threadId: 'thread-1',
+            message: 'hello',
+            mode: { permissionMode: 'default' },
+            overrides: { approvalPolicy: 'on-request', model: 'gpt-5' }
         });
 
-        expect(turnParams.threadId).toBe('thread-2');
-        expect(turnParams.input).toEqual([{ type: 'text', text: '继续' }]);
-        expect(turnParams.model).toBe('o3');
-        expect(turnParams.sandboxPolicy).toEqual({ type: 'workspaceWrite' });
+        expect(params.approvalPolicy).toBe('on-request');
+        expect(params.model).toBe('gpt-5');
     });
 });
