@@ -12,7 +12,7 @@
     },
     "cli": {
       "name": "@aiflyzx/hapi",
-      "version": "0.7.3",
+      "version": "0.7.4",
       "bin": {
         "hapi": "bin/hapi.cjs",
       },
@@ -43,11 +43,11 @@
         "vitest": "^4.0.16",
       },
       "optionalDependencies": {
-        "@aiflyzx/hapi-darwin-arm64": "0.7.3",
-        "@aiflyzx/hapi-darwin-x64": "0.7.3",
-        "@aiflyzx/hapi-linux-arm64": "0.7.3",
-        "@aiflyzx/hapi-linux-x64": "0.7.3",
-        "@aiflyzx/hapi-win32-x64": "0.7.3",
+        "@aiflyzx/hapi-darwin-arm64": "0.7.4",
+        "@aiflyzx/hapi-darwin-x64": "0.7.4",
+        "@aiflyzx/hapi-linux-arm64": "0.7.4",
+        "@aiflyzx/hapi-linux-x64": "0.7.4",
+        "@aiflyzx/hapi-win32-x64": "0.7.4",
       },
     },
     "docs": {
