@@ -77,7 +77,10 @@ function HappyNestedBlockList(props: {
 
                 if (block.kind === 'agent-text') {
                     return (
-                        <div key={`agent:${block.id}`} className="px-1">
+                        <div
+                            key={`agent:${block.id}`}
+                            className="mr-auto w-fit min-w-0 max-w-[92%] rounded-xl bg-[var(--app-secondary-bg)] px-3 py-2 text-[var(--app-fg)] shadow-sm"
+                        >
                             <MarkdownRenderer content={block.text} />
                         </div>
                     )

@@ -5,12 +5,20 @@ import { HappyToolMessage } from '@/components/AssistantChat/messages/ToolMessag
 import { CliOutputBlock } from '@/components/CliOutputBlock'
 import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
 
+function AssistantTextBubble() {
+    return (
+        <div className="my-1.5 mr-auto w-fit min-w-0 max-w-[92%] rounded-xl bg-[var(--app-secondary-bg)] px-3 py-2 text-[var(--app-fg)] shadow-sm">
+            <MarkdownText />
+        </div>
+    )
+}
+
 const TOOL_COMPONENTS = {
     Fallback: HappyToolMessage
 } as const
 
 const MESSAGE_PART_COMPONENTS = {
-    Text: MarkdownText,
+    Text: AssistantTextBubble,
     Reasoning: Reasoning,
     ReasoningGroup: ReasoningGroup,
     tools: TOOL_COMPONENTS
