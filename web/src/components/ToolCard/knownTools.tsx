@@ -245,7 +245,8 @@ export const knownTools: Record<string, {
     },
     CodexReasoning: {
         icon: () => <BulbIcon className={DEFAULT_ICON_CLASS} />,
-        title: (opts) => getInputStringAny(opts.input, ['title']) ?? 'Reasoning',
+        title: () => 'Reasoning',
+        subtitle: (opts) => getInputStringAny(opts.input, ['title']) ?? null,
         minimal: true
     },
     CodexPatch: {

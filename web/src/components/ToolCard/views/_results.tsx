@@ -46,6 +46,10 @@ function extractTextFromResult(result: unknown, depth: number = 0): string | nul
     if (typeof result.content === 'string') return result.content
     if (typeof result.text === 'string') return result.text
     if (typeof result.output === 'string') return result.output
+    if (typeof result.formatted_output === 'string') return result.formatted_output
+    if (typeof result.aggregated_output === 'string') return result.aggregated_output
+    if (typeof result.stdout === 'string') return result.stdout
+    if (typeof result.stderr === 'string') return result.stderr
     if (typeof result.error === 'string') return result.error
     if (typeof result.message === 'string') return result.message
 
@@ -157,7 +161,7 @@ function extractStdoutStderr(result: unknown): { stdout: string | null; stderr: 
 
     const stdout = typeof result.stdout === 'string' ? result.stdout : null
     const stderr = typeof result.stderr === 'string' ? result.stderr : null
-    if (stdout !== null || stderr !== null) {
+    if ((stdout && stdout.length > 0) || (stderr && stderr.length > 0)) {
         return { stdout, stderr }
     }
 
@@ -165,7 +169,7 @@ function extractStdoutStderr(result: unknown): { stdout: string | null; stderr: 
     if (nested) {
         const nestedStdout = typeof nested.stdout === 'string' ? nested.stdout : null
         const nestedStderr = typeof nested.stderr === 'string' ? nested.stderr : null
-        if (nestedStdout !== null || nestedStderr !== null) {
+        if ((nestedStdout && nestedStdout.length > 0) || (nestedStderr && nestedStderr.length > 0)) {
             return { stdout: nestedStdout, stderr: nestedStderr }
         }
     }
@@ -227,7 +231,7 @@ const BashResultView: ToolViewComponent = (props: ToolViewProps) => {
         const display = toolUseError.isToolUseError ? (toolUseError.errorMessage ?? '') : result
         return (
             <>
-                <CodeBlock code={display} language="text" />
+                <CodeBlock code={display} language="text" wrapLongLines />
                 <RawJsonDevOnly value={result} />
             </>
         )
@@ -238,8 +242,8 @@ const BashResultView: ToolViewComponent = (props: ToolViewProps) => {
         return (
             <>
                 <div className="flex flex-col gap-2">
-                    {stdio.stdout ? <CodeBlock code={stdio.stdout} language="text" /> : null}
-                    {stdio.stderr ? <CodeBlock code={stdio.stderr} language="text" /> : null}
+                    {stdio.stdout ? <CodeBlock code={stdio.stdout} language="text" wrapLongLines /> : null}
+                    {stdio.stderr ? <CodeBlock code={stdio.stderr} language="text" wrapLongLines /> : null}
                 </div>
                 <RawJsonDevOnly value={result} />
             </>
@@ -250,7 +254,16 @@ const BashResultView: ToolViewComponent = (props: ToolViewProps) => {
     if (text) {
         return (
             <>
-                {renderText(text, { mode: 'code', language: 'text' })}
+                <CodeBlock code={text} language="text" wrapLongLines />
+                <RawJsonDevOnly value={result} />
+            </>
+        )
+    }
+
+    if (isObject(result) || Array.isArray(result)) {
+        return (
+            <>
+                <CodeBlock code={safeStringify(result)} language="json" />
                 <RawJsonDevOnly value={result} />
             </>
         )
@@ -596,6 +609,7 @@ const GenericResultView: ToolViewComponent = (props: ToolViewProps) => {
 export const toolResultViewRegistry: Record<string, ToolViewComponent> = {
     Task: MarkdownResultView,
     Bash: BashResultView,
+    CodexBash: BashResultView,
     Glob: LineListResultView,
     Grep: LineListResultView,
     LS: LineListResultView,

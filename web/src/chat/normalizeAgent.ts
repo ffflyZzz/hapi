@@ -31,6 +31,40 @@ function normalizeAgentEvent(value: unknown): AgentEvent | null {
     return value as AgentEvent
 }
 
+function extractCodexCallId(data: Record<string, unknown>): string | null {
+    return asString(
+        data.callId
+        ?? data.call_id
+        ?? data.toolCallId
+        ?? data.tool_call_id
+        ?? data.toolUseId
+        ?? data.tool_use_id
+    )
+}
+
+function extractCodexToolResultOutput(data: Record<string, unknown>): unknown {
+    if ('output' in data) return data.output
+    if ('result' in data) return data.result
+    if ('content' in data) return data.content
+    if ('response' in data) return data.response
+    if ('message' in data) return data.message
+    return undefined
+}
+
+function extractCodexToolResultIsError(data: Record<string, unknown>): boolean {
+    const value = data.is_error ?? data.isError
+    if (typeof value === 'boolean') return value
+    if (typeof value === 'number') return value !== 0
+    if (typeof value === 'string') return value.trim().length > 0
+
+    const errorField = data.error
+    if (typeof errorField === 'boolean') return errorField
+    if (typeof errorField === 'number') return errorField !== 0
+    if (typeof errorField === 'string') return errorField.trim().length > 0
+
+    return false
+}
+
 function normalizeAssistantOutput(
     messageId: string,
     localId: string | null,
@@ -324,7 +358,9 @@ export function normalizeAgentRecord(
             }
         }
 
-        if (data.type === 'tool-call' && typeof data.callId === 'string') {
+        if ((data.type === 'tool-call' || data.type === 'tool_call')) {
+            const callId = extractCodexCallId(data)
+            if (!callId) return null
             const uuid = asString(data.id) ?? messageId
             return {
                 id: messageId,
@@ -334,9 +370,9 @@ export function normalizeAgentRecord(
                 isSidechain: false,
                 content: [{
                     type: 'tool-call',
-                    id: data.callId,
+                    id: callId,
                     name: asString(data.name) ?? 'unknown',
-                    input: data.input,
+                    input: 'input' in data ? data.input : ('arguments' in data ? data.arguments : ('args' in data ? data.args : undefined)),
                     description: null,
                     uuid,
                     parentUUID: null
@@ -345,8 +381,11 @@ export function normalizeAgentRecord(
             }
         }
 
-        if (data.type === 'tool-call-result' && typeof data.callId === 'string') {
+        if (data.type === 'tool-call-result' || data.type === 'tool_result' || data.type === 'tool-call-output') {
+            const callId = extractCodexCallId(data)
+            if (!callId) return null
             const uuid = asString(data.id) ?? messageId
+            const output = extractCodexToolResultOutput(data)
             return {
                 id: messageId,
                 localId,
@@ -355,9 +394,9 @@ export function normalizeAgentRecord(
                 isSidechain: false,
                 content: [{
                     type: 'tool-result',
-                    tool_use_id: data.callId,
-                    content: data.output,
-                    is_error: false,
+                    tool_use_id: callId,
+                    content: output,
+                    is_error: extractCodexToolResultIsError(data),
                     uuid,
                     parentUUID: null
                 }],

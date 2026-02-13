@@ -142,6 +142,40 @@ function renderExitPlanModeInput(input: unknown): ReactNode | null {
     return <MarkdownRenderer content={plan} />
 }
 
+function extractTextFromToolResult(result: unknown, depth: number = 0): string | null {
+    if (depth > 2) return null
+    if (typeof result === 'string') return result
+    if (!isObject(result)) return null
+
+    if (typeof result.content === 'string') return result.content
+    if (typeof result.text === 'string') return result.text
+    if (typeof result.output === 'string') return result.output
+    if (typeof result.stdout === 'string') return result.stdout
+    if (typeof result.stderr === 'string') return result.stderr
+    if (typeof result.error === 'string') return result.error
+    if (typeof result.message === 'string') return result.message
+
+    if (isObject(result.result)) {
+        const nested = extractTextFromToolResult(result.result, depth + 1)
+        if (nested) return nested
+    }
+    if (isObject(result.data)) {
+        const nested = extractTextFromToolResult(result.data, depth + 1)
+        if (nested) return nested
+    }
+    if (isObject(result.output)) {
+        const nested = extractTextFromToolResult(result.output, depth + 1)
+        if (nested) return nested
+    }
+
+    return null
+}
+
+function hasVisibleToolResult(result: unknown): boolean {
+    const text = extractTextFromToolResult(result)
+    return typeof text === 'string' && text.trim().length > 0
+}
+
 function renderToolInput(block: ToolCallBlock): ReactNode {
     const toolName = block.tool.name
     const input = block.tool.input
@@ -219,7 +253,7 @@ function renderToolInput(block: ToolCallBlock): ReactNode {
             ? commandArray.filter((part) => typeof part === 'string').join(' ')
             : getInputStringAny(input, ['command', 'cmd'])
         if (cmd) {
-            return <CodeBlock code={cmd} language="bash" />
+            return <CodeBlock code={cmd} language="bash" wrapLongLines />
         }
     }
 
@@ -314,6 +348,11 @@ function ToolCardInner(props: ToolCardProps) {
     const isAskUserQuestion = isAskUserQuestionToolName(toolName)
     const isRequestUserInput = isRequestUserInputToolName(toolName)
     const isQuestionTool = isAskUserQuestion || isRequestUserInput
+    const isCodexPatchOrDiff = toolName === 'CodexDiff' || toolName === 'CodexPatch'
+    const hideResultSectionForPatchOrDiff = isCodexPatchOrDiff
+        && (props.block.tool.state !== 'error' || !hasVisibleToolResult(props.block.tool.result))
+    const hideResultSectionForReasoning = toolName === 'CodexReasoning' && !hasVisibleToolResult(props.block.tool.result)
+    const hideResultSection = hideResultSectionForPatchOrDiff || hideResultSectionForReasoning
     const showsPermissionFooter = Boolean(permission && (
         permission.status === 'pending'
         || ((permission.status === 'denied' || permission.status === 'canceled') && Boolean(permission.reason))
@@ -392,7 +431,7 @@ function ToolCardInner(props: ToolCardProps) {
                                             renderToolInput(props.block)
                                         )}
                                     </div>
-                                    {!isQuestionToolWithAnswers && (
+                                    {!isQuestionToolWithAnswers && !hideResultSection && (
                                         <div>
                                             <div className="mb-1 text-xs font-medium text-[var(--app-hint)]">{t('tool.result')}</div>
                                             <ResultToolView block={props.block} metadata={props.metadata} />
@@ -424,10 +463,12 @@ function ToolCardInner(props: ToolCardProps) {
                                     <div className="mb-1 text-xs font-medium text-[var(--app-hint)]">{t('tool.input')}</div>
                                     {renderToolInput(props.block)}
                                 </div>
-                                <div>
-                                    <div className="mb-1 text-xs font-medium text-[var(--app-hint)]">{t('tool.result')}</div>
-                                    <ResultToolView block={props.block} metadata={props.metadata} />
-                                </div>
+                                {!hideResultSection ? (
+                                    <div>
+                                        <div className="mb-1 text-xs font-medium text-[var(--app-hint)]">{t('tool.result')}</div>
+                                        <ResultToolView block={props.block} metadata={props.metadata} />
+                                    </div>
+                                ) : null}
                             </div>
                         )
                     ) : null}

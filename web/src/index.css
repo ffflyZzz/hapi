@@ -89,6 +89,46 @@
     --app-badge-error-border: rgba(248, 113, 113, 0.35);
 }
 
+[data-color-preset="natural"] {
+    --app-bg: #f2ecde;
+    --app-fg: #2b2b24;
+    --app-hint: #6f664f;
+    --app-link: #5f7f52;
+    --app-button: #5f7f52;
+    --app-button-text: #f4f8f2;
+    --app-banner-bg: #5f7f52;
+    --app-banner-text: #f4f8f2;
+    /* Keep cards and dialogs readable in Natural mode (avoid translucent overlays). */
+    --app-secondary-bg: #e5ddcd;
+
+    --app-border: rgba(93, 82, 58, 0.28);
+    --app-divider: rgba(93, 82, 58, 0.17);
+    --app-subtle-bg: #ece5d6;
+    --app-code-bg: #f8f2e7;
+    --app-inline-code-bg: rgba(93, 82, 58, 0.13);
+
+    --app-diff-added-bg: #e7f1df;
+    --app-diff-added-text: #2b2b24;
+    --app-diff-removed-bg: #f5e5e3;
+    --app-diff-removed-text: #2b2b24;
+
+    --app-git-staged-color: #5f7f52;
+    --app-git-unstaged-color: #b5773d;
+    --app-git-deleted-color: #c65a4b;
+    --app-git-renamed-color: #6f93c2;
+    --app-git-untracked-color: #8f8167;
+
+    --app-badge-warning-bg: rgba(181, 119, 61, 0.2);
+    --app-badge-warning-text: #8a5524;
+    --app-badge-warning-border: rgba(181, 119, 61, 0.3);
+    --app-badge-success-bg: rgba(95, 127, 82, 0.2);
+    --app-badge-success-text: #3f5f33;
+    --app-badge-success-border: rgba(95, 127, 82, 0.3);
+    --app-badge-error-bg: rgba(198, 90, 75, 0.18);
+    --app-badge-error-text: #9b3f34;
+    --app-badge-error-border: rgba(198, 90, 75, 0.3);
+}
+
 html {
     font-size: calc(100% * var(--app-font-scale, 1));
 }

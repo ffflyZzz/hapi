@@ -3,6 +3,7 @@ import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { getElevenLabsSupportedLanguages, getLanguageDisplayName, type Language } from '@/lib/languages'
 import { getFontScaleOptions, useFontScale, type FontScale } from '@/hooks/useFontScale'
+import { getColorPresetOptions, useTheme, type ColorPreset } from '@/hooks/useTheme'
 import { PROTOCOL_VERSION } from '@hapi/protocol'
 
 const locales: { value: Locale; nativeLabel: string }[] = [
@@ -74,11 +75,14 @@ export default function SettingsPage() {
     const goBack = useAppGoBack()
     const [isOpen, setIsOpen] = useState(false)
     const [isFontOpen, setIsFontOpen] = useState(false)
+    const [isColorPresetOpen, setIsColorPresetOpen] = useState(false)
     const [isVoiceOpen, setIsVoiceOpen] = useState(false)
     const containerRef = useRef<HTMLDivElement>(null)
     const fontContainerRef = useRef<HTMLDivElement>(null)
+    const colorPresetContainerRef = useRef<HTMLDivElement>(null)
     const voiceContainerRef = useRef<HTMLDivElement>(null)
     const { fontScale, setFontScale } = useFontScale()
+    const { colorPreset, setColorPreset } = useTheme()
 
     // Voice language state - read from localStorage
     const [voiceLanguage, setVoiceLanguage] = useState<string | null>(() => {
@@ -86,8 +90,10 @@ export default function SettingsPage() {
     })
 
     const fontScaleOptions = getFontScaleOptions()
+    const colorPresetOptions = getColorPresetOptions()
     const currentLocale = locales.find((loc) => loc.value === locale)
     const currentFontScaleLabel = fontScaleOptions.find((opt) => opt.value === fontScale)?.label ?? '100%'
+    const currentColorPresetLabel = t(colorPresetOptions.find((opt) => opt.value === colorPreset)?.labelKey ?? 'settings.display.colorPreset.default')
     const currentVoiceLanguage = voiceLanguages.find((lang) => lang.code === voiceLanguage)
 
     const handleLocaleChange = (newLocale: Locale) => {
@@ -98,6 +104,11 @@ export default function SettingsPage() {
     const handleFontScaleChange = (newScale: FontScale) => {
         setFontScale(newScale)
         setIsFontOpen(false)
+    }
+
+    const handleColorPresetChange = (newColorPreset: ColorPreset) => {
+        setColorPreset(newColorPreset)
+        setIsColorPresetOpen(false)
     }
 
     const handleVoiceLanguageChange = (language: Language) => {
@@ -112,7 +123,7 @@ export default function SettingsPage() {
 
     // Close dropdown when clicking outside
     useEffect(() => {
-        if (!isOpen && !isFontOpen && !isVoiceOpen) return
+        if (!isOpen && !isFontOpen && !isColorPresetOpen && !isVoiceOpen) return
 
         const handleClickOutside = (event: MouseEvent) => {
             if (isOpen && containerRef.current && !containerRef.current.contains(event.target as Node)) {
@@ -121,6 +132,9 @@ export default function SettingsPage() {
             if (isFontOpen && fontContainerRef.current && !fontContainerRef.current.contains(event.target as Node)) {
                 setIsFontOpen(false)
             }
+            if (isColorPresetOpen && colorPresetContainerRef.current && !colorPresetContainerRef.current.contains(event.target as Node)) {
+                setIsColorPresetOpen(false)
+            }
             if (isVoiceOpen && voiceContainerRef.current && !voiceContainerRef.current.contains(event.target as Node)) {
                 setIsVoiceOpen(false)
             }
@@ -128,23 +142,24 @@ export default function SettingsPage() {
 
         document.addEventListener('mousedown', handleClickOutside)
         return () => document.removeEventListener('mousedown', handleClickOutside)
-    }, [isOpen, isFontOpen, isVoiceOpen])
+    }, [isOpen, isFontOpen, isColorPresetOpen, isVoiceOpen])
 
     // Close on escape key
     useEffect(() => {
-        if (!isOpen && !isFontOpen && !isVoiceOpen) return
+        if (!isOpen && !isFontOpen && !isColorPresetOpen && !isVoiceOpen) return
 
         const handleEscape = (event: KeyboardEvent) => {
             if (event.key === 'Escape') {
                 setIsOpen(false)
                 setIsFontOpen(false)
+                setIsColorPresetOpen(false)
                 setIsVoiceOpen(false)
             }
         }
 
         document.addEventListener('keydown', handleEscape)
         return () => document.removeEventListener('keydown', handleEscape)
-    }, [isOpen, isFontOpen, isVoiceOpen])
+    }, [isOpen, isFontOpen, isColorPresetOpen, isVoiceOpen])
 
     return (
         <div className="flex h-full flex-col">
@@ -226,7 +241,10 @@ export default function SettingsPage() {
                         <div ref={fontContainerRef} className="relative">
                             <button
                                 type="button"
-                                onClick={() => setIsFontOpen(!isFontOpen)}
+                                onClick={() => {
+                                    setIsFontOpen(!isFontOpen)
+                                    setIsColorPresetOpen(false)
+                                }}
                                 className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
                                 aria-expanded={isFontOpen}
                                 aria-haspopup="listbox"
@@ -260,6 +278,57 @@ export default function SettingsPage() {
                                                 }`}
                                             >
                                                 <span>{opt.label}</span>
+                                                {isSelected && (
+                                                    <span className="ml-2 text-[var(--app-link)]">
+                                                        <CheckIcon />
+                                                    </span>
+                                                )}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                        <div ref={colorPresetContainerRef} className="relative">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setIsColorPresetOpen(!isColorPresetOpen)
+                                    setIsFontOpen(false)
+                                }}
+                                className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                                aria-expanded={isColorPresetOpen}
+                                aria-haspopup="listbox"
+                            >
+                                <span className="text-[var(--app-fg)]">{t('settings.display.colorPreset')}</span>
+                                <span className="flex items-center gap-1 text-[var(--app-hint)]">
+                                    <span>{currentColorPresetLabel}</span>
+                                    <ChevronDownIcon className={`transition-transform ${isColorPresetOpen ? 'rotate-180' : ''}`} />
+                                </span>
+                            </button>
+
+                            {isColorPresetOpen && (
+                                <div
+                                    className="absolute right-3 top-full mt-1 min-w-[160px] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] shadow-lg overflow-hidden z-50"
+                                    role="listbox"
+                                    aria-label={t('settings.display.colorPreset')}
+                                >
+                                    {colorPresetOptions.map((opt) => {
+                                        const isSelected = colorPreset === opt.value
+                                        return (
+                                            <button
+                                                key={opt.value}
+                                                type="button"
+                                                role="option"
+                                                aria-selected={isSelected}
+                                                onClick={() => handleColorPresetChange(opt.value)}
+                                                className={`flex items-center justify-between w-full px-3 py-2 text-base text-left transition-colors ${
+                                                    isSelected
+                                                        ? 'text-[var(--app-link)] bg-[var(--app-subtle-bg)]'
+                                                        : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
+                                                }`}
+                                            >
+                                                <span>{t(opt.labelKey)}</span>
                                                 {isSelected && (
                                                     <span className="ml-2 text-[var(--app-link)]">
                                                         <CheckIcon />
