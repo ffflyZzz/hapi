@@ -5,7 +5,7 @@ const path = require('path');
 
 const platform = process.platform;
 const arch = process.arch;
-const pkgName = `@twsxtd/hapi-${platform}-${arch}`;
+const pkgName = `@aiflyzx/hapi-${platform}-${arch}`;
 
 function getBinaryPath() {
     try {
@@ -31,7 +31,7 @@ if (!binPath) {
     console.error('  - win32-x64');
     console.error('');
     console.error('You can download the binary manually from:');
-    console.error('  https://github.com/tiann/hapi/releases');
+    console.error('  https://github.com/ffflyZzz/hapi/releases');
     process.exit(1);
 }
 

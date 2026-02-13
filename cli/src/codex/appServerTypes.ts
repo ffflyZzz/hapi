@@ -35,6 +35,33 @@ export interface ThreadStartResponse {
     [key: string]: unknown;
 }
 
+export interface ThreadReadParams {
+    threadId: string;
+    includeTurns?: boolean;
+}
+
+export interface ThreadReadResponse {
+    thread?: {
+        id?: string;
+        [key: string]: unknown;
+    };
+    [key: string]: unknown;
+}
+
+export interface ThreadListParams {
+    cursor?: string | null;
+    limit?: number;
+    archived?: boolean;
+    modelProviders?: string[];
+    sourceKinds?: string[];
+}
+
+export interface ThreadListResponse {
+    data?: Array<Record<string, unknown>>;
+    nextCursor?: string | null;
+    [key: string]: unknown;
+}
+
 export type ResponseItem = Record<string, unknown>;
 
 export interface ThreadResumeParams {
@@ -78,6 +105,11 @@ export type UserInput =
     }
     | {
         type: 'skill';
+        name: string;
+        path: string;
+    }
+    | {
+        type: 'mention';
         name: string;
         path: string;
     };
@@ -124,6 +156,17 @@ export interface TurnStartResponse {
     [key: string]: unknown;
 }
 
+export interface TurnSteerParams {
+    threadId: string;
+    turnId?: string;
+    input: UserInput[];
+}
+
+export interface TurnSteerResponse {
+    turnId?: string;
+    [key: string]: unknown;
+}
+
 export interface TurnInterruptParams {
     threadId: string;
     turnId: string;
@@ -131,5 +174,24 @@ export interface TurnInterruptParams {
 
 export interface TurnInterruptResponse {
     ok: boolean;
+    [key: string]: unknown;
+}
+
+export interface ReviewStartParams {
+    threadId: string;
+    target?: 'uncommitted' | 'branch' | 'commits' | 'full';
+    commits?: string[];
+    baseBranch?: string;
+    headBranch?: string;
+    delivery?: 'sameThread' | 'detached';
+}
+
+export interface ReviewStartResponse {
+    reviewThreadId?: string;
+    turn?: {
+        id?: string;
+        status?: string;
+        [key: string]: unknown;
+    };
     [key: string]: unknown;
 }

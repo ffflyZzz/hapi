@@ -20,8 +20,8 @@ https://github.com/user-attachments/assets/38230353-94c6-4dbe-9c29-b2a2cc457546
 ## Getting Started
 
 ```bash
-npx @twsxtd/hapi hub --relay     # start hub with E2E encrypted relay
-npx @twsxtd/hapi                 # run claude code
+npx @aiflyzx/hapi hub --relay     # start hub with E2E encrypted relay
+npx @aiflyzx/hapi                 # run claude code
 ```
 
 `hapi server` remains supported as an alias.
@@ -39,6 +39,10 @@ For self-hosted options (Cloudflare Tunnel, Tailscale), see [Installation](docs/
 - [Voice Assistant](docs/guide/voice-assistant.md)
 - [Why HAPI](docs/guide/why-hapi.md)
 - [FAQ](docs/guide/faq.md)
+
+## Acknowledgements
+
+Huge thanks to the original [Happy](https://github.com/slopus/happy) author and community for the inspiration and foundation.
 
 ## Build from source
 

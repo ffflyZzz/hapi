@@ -361,12 +361,27 @@ export function query(config: {
         childStdin = child.stdin
     }
 
-    // Handle stderr in debug mode
-    if (process.env.DEBUG) {
-        child.stderr.on('data', (data) => {
-            console.error('Claude Code stderr:', data.toString())
-        })
+    let stderrBuffer = ''
+    const trimStderrBuffer = (value: string): string => value.length > 4000 ? value.slice(-4000) : value
+    const getStderrSummary = (): string | null => {
+        const lines = stderrBuffer
+            .split(/\r?\n/)
+            .map(line => line.trim())
+            .filter(Boolean)
+        if (lines.length === 0) {
+            return null
+        }
+        const lastLine = lines[lines.length - 1]
+        return lastLine.length > 300 ? `${lastLine.slice(0, 300)}...` : lastLine
     }
+
+    child.stderr.on('data', (data) => {
+        const chunk = data.toString()
+        stderrBuffer = trimStderrBuffer(stderrBuffer + chunk)
+        if (process.env.DEBUG) {
+            console.error('Claude Code stderr:', chunk)
+        }
+    })
 
     // Setup cleanup
     const cleanup = () => {
@@ -380,12 +395,19 @@ export function query(config: {
 
     // Handle process exit
     const processExitPromise = new Promise<void>((resolve) => {
-        child.on('close', (code) => {
+        child.on('close', (code, signal) => {
             if (config.options?.abort?.aborted) {
                 query.setError(new AbortError('Claude Code process aborted by user'))
+                resolve()
+                return
             }
             if (code !== 0) {
-                query.setError(new Error(`Claude Code process exited with code ${code}`))
+                const signalInfo = signal ? `, signal ${signal}` : ''
+                const stderrInfo = getStderrSummary()
+                const stderrSuffix = stderrInfo ? `: ${stderrInfo}` : ''
+                query.setError(new Error(`Claude Code process exited with code ${code}${signalInfo}${stderrSuffix}`))
+                resolve()
+                return
             } else {
                 resolve()
             }

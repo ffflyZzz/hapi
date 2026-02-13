@@ -6,12 +6,20 @@ import type {
     InitializeResponse,
     ThreadStartParams,
     ThreadStartResponse,
+    ThreadReadParams,
+    ThreadReadResponse,
+    ThreadListParams,
+    ThreadListResponse,
     ThreadResumeParams,
     ThreadResumeResponse,
     TurnStartParams,
     TurnStartResponse,
+    TurnSteerParams,
+    TurnSteerResponse,
     TurnInterruptParams,
-    TurnInterruptResponse
+    TurnInterruptResponse,
+    ReviewStartParams,
+    ReviewStartResponse
 } from './appServerTypes';
 
 type JsonRpcLiteRequest = {
@@ -149,6 +157,22 @@ export class CodexAppServerClient {
         return response as ThreadResumeResponse;
     }
 
+    async readThread(params: ThreadReadParams, options?: { signal?: AbortSignal }): Promise<ThreadReadResponse> {
+        const response = await this.sendRequest('thread/read', params, {
+            signal: options?.signal,
+            timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
+        });
+        return response as ThreadReadResponse;
+    }
+
+    async listThreads(params?: ThreadListParams, options?: { signal?: AbortSignal }): Promise<ThreadListResponse> {
+        const response = await this.sendRequest('thread/list', params ?? {}, {
+            signal: options?.signal,
+            timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
+        });
+        return response as ThreadListResponse;
+    }
+
     async startTurn(params: TurnStartParams, options?: { signal?: AbortSignal }): Promise<TurnStartResponse> {
         const response = await this.sendRequest('turn/start', params, {
             signal: options?.signal,
@@ -157,11 +181,27 @@ export class CodexAppServerClient {
         return response as TurnStartResponse;
     }
 
+    async steerTurn(params: TurnSteerParams, options?: { signal?: AbortSignal }): Promise<TurnSteerResponse> {
+        const response = await this.sendRequest('turn/steer', params, {
+            signal: options?.signal,
+            timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
+        });
+        return response as TurnSteerResponse;
+    }
+
     async interruptTurn(params: TurnInterruptParams): Promise<TurnInterruptResponse> {
         const response = await this.sendRequest('turn/interrupt', params, {
             timeoutMs: 30_000
         });
         return response as TurnInterruptResponse;
+    }
+
+    async startReview(params: ReviewStartParams, options?: { signal?: AbortSignal }): Promise<ReviewStartResponse> {
+        const response = await this.sendRequest('review/start', params, {
+            signal: options?.signal,
+            timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
+        });
+        return response as ReviewStartResponse;
     }
 
     async disconnect(): Promise<void> {

@@ -8,7 +8,7 @@ body:
       value: |
         Thank you for submitting a bug report! It helps make HAPI better for everyone.
 
-        If you need help or support using HAPI, and are not reporting a bug, please post on [HAPI/discussions](https://github.com/tiann/hapi/discussions), where you can ask questions or engage with others on ideas for how to improve HAPI.
+        If you need help or support using HAPI, and are not reporting a bug, please post on [HAPI/discussions](https://github.com/ffflyZzz/hapi/discussions), where you can ask questions or engage with others on ideas for how to improve HAPI.
 
         You are already an engineer who uses coding agents; you should know how to describe issues clearly. Issues that lack a clear description will be closed.
 

@@ -18,11 +18,13 @@ interface PermissionResponse {
     approved: boolean;
     decision?: 'approved' | 'approved_for_session' | 'denied' | 'abort';
     reason?: string;
+    answers?: Record<string, string[]> | Record<string, { answers: string[] }>;
 }
 
 interface PermissionResult {
     decision: 'approved' | 'approved_for_session' | 'denied' | 'abort';
     reason?: string;
+    answers?: Record<string, string[]>;
 }
 
 type CodexPermissionHandlerOptions = {
@@ -34,8 +36,31 @@ type CodexPermissionHandlerOptions = {
         approved: boolean;
         decision: PermissionResult['decision'];
         reason?: string;
+        answers?: PermissionResult['answers'];
     }) => void;
 };
+
+function normalizeAnswers(
+    answers: PermissionResponse['answers']
+): Record<string, string[]> | undefined {
+    if (!answers) {
+        return undefined;
+    }
+
+    const normalized: Record<string, string[]> = {};
+    for (const [key, value] of Object.entries(answers)) {
+        if (Array.isArray(value)) {
+            normalized[key] = value.filter((entry: unknown): entry is string => typeof entry === 'string');
+            continue;
+        }
+
+        if (value && typeof value === 'object' && Array.isArray(value.answers)) {
+            normalized[key] = value.answers.filter((entry: unknown): entry is string => typeof entry === 'string');
+        }
+    }
+
+    return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
 
 export class CodexPermissionHandler extends BasePermissionHandler<PermissionResponse, PermissionResult> {
     constructor(session: ApiSessionClient, private readonly options?: CodexPermissionHandlerOptions) {
@@ -86,14 +111,17 @@ export class CodexPermissionHandler extends BasePermissionHandler<PermissionResp
         pending: PendingPermissionRequest<PermissionResult>
     ): Promise<PermissionCompletion> {
         const reason = typeof response.reason === 'string' ? response.reason : undefined;
+        const answers = normalizeAnswers(response.answers);
         const result: PermissionResult = response.approved
             ? {
                 decision: response.decision === 'approved_for_session' ? 'approved_for_session' : 'approved',
-                reason
+                reason,
+                answers
             }
             : {
                 decision: response.decision === 'denied' ? 'denied' : 'abort',
-                reason
+                reason,
+                answers
             };
 
         pending.resolve(result);
@@ -105,13 +133,15 @@ export class CodexPermissionHandler extends BasePermissionHandler<PermissionResp
             input: pending.input,
             approved: response.approved,
             decision: result.decision,
-            reason: result.reason
+            reason: result.reason,
+            answers: result.answers
         });
 
         return {
             status: response.approved ? 'approved' : 'denied',
             decision: result.decision,
-            reason: result.reason
+            reason: result.reason,
+            answers: result.answers
         };
     }
 

@@ -70,13 +70,7 @@ HAPI has three components:
 ## Install the CLI
 
 ```bash
-npm install -g @twsxtd/hapi
-```
-
-Or with Homebrew:
-
-```bash
-brew install tiann/tap/hapi
+npm install -g @aiflyzx/hapi
 ```
 
 ## Other install options
@@ -85,14 +79,14 @@ brew install tiann/tap/hapi
 <summary>npx (no install)</summary>
 
 ```bash
-npx @twsxtd/hapi
+npx @aiflyzx/hapi
 ```
 </details>
 
 <details>
 <summary>Prebuilt binary</summary>
 
-Download the latest release from [GitHub Releases](https://github.com/tiann/hapi/releases).
+Download the latest release from [GitHub Releases](https://github.com/ffflyZzz/hapi/releases).
 
 ```bash
 xattr -d com.apple.quarantine ./hapi
@@ -105,7 +99,7 @@ sudo mv ./hapi /usr/local/bin/
 <summary>Build from source</summary>
 
 ```bash
-git clone https://github.com/tiann/hapi.git
+git clone https://github.com/ffflyZzz/hapi.git
 cd hapi
 bun install
 bun build:single-exe
@@ -172,6 +166,7 @@ On first run, HAPI:
 |----------|---------|---------------|-------------|
 | `CLI_API_TOKEN` | Auto-generated | `cliApiToken` | Shared secret for authentication |
 | `HAPI_API_URL` | `http://localhost:3006` | `apiUrl` | Hub URL for CLI connections |
+| `HAPI_HOSTNAME` | OS hostname | - | Override hostname reported to the server/UI |
 | `HAPI_LISTEN_HOST` | `127.0.0.1` | `listenHost` | Hub HTTP bind address |
 | `HAPI_LISTEN_PORT` | `3006` | `listenPort` | Hub HTTP port |
 | `HAPI_PUBLIC_URL` | - | `publicUrl` | Public URL for external access |

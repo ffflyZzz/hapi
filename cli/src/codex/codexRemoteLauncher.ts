@@ -179,6 +179,17 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 const cwdValue = inputRecord.cwd;
                 const cwd = typeof cwdValue === 'string' && cwdValue.trim().length > 0 ? cwdValue : undefined;
 
+                if (toolName === 'request_user_input' || toolName === 'AskUserQuestion' || toolName === 'ask_user_question') {
+                    session.sendCodexMessage({
+                        type: 'tool-call',
+                        name: toolName,
+                        callId: id,
+                        input: inputRecord,
+                        id: randomUUID()
+                    });
+                    return;
+                }
+
                 session.sendCodexMessage({
                     type: 'tool-call',
                     name: 'CodexPermission',
@@ -192,13 +203,14 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     id: randomUUID()
                 });
             },
-            onComplete: ({ id, decision, reason, approved }) => {
+            onComplete: ({ id, decision, reason, approved, answers }) => {
                 session.sendCodexMessage({
                     type: 'tool-call-result',
                     callId: id,
                     output: {
                         decision,
-                        reason
+                        reason,
+                        answers
                     },
                     is_error: !approved,
                     id: randomUUID()
@@ -214,6 +226,61 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         this.permissionHandler = permissionHandler;
         this.reasoningProcessor = reasoningProcessor;
         this.diffProcessor = diffProcessor;
+
+        const planCallIdByTurn = new Map<string, string>();
+
+        const toTraceFields = (source: Record<string, unknown>): Record<string, unknown> => {
+            const trace: Record<string, unknown> = {};
+            const threadId = asString(source.thread_id ?? source.threadId);
+            const turnId = asString(source.turn_id ?? source.turnId);
+            const itemId = asString(source.item_id ?? source.itemId);
+            const status = asString(source.status);
+            if (threadId) trace.thread_id = threadId;
+            if (turnId) trace.turn_id = turnId;
+            if (itemId) trace.item_id = itemId;
+            if (status) trace.status = status;
+            return trace;
+        };
+
+        const stripEnvelopeFields = (source: Record<string, unknown>): Record<string, unknown> => {
+            const copy: Record<string, unknown> = { ...source };
+            delete copy.type;
+            delete copy.call_id;
+            delete copy.callId;
+            return copy;
+        };
+
+        const extractCallId = (source: Record<string, unknown>, prefix: string): string => {
+            return asString(source.call_id ?? source.callId ?? source.item_id ?? source.itemId)
+                ?? `${prefix}:${randomUUID()}`;
+        };
+
+        const emitToolCall = (name: string, callId: string, input: unknown, source: Record<string, unknown>): void => {
+            session.sendCodexMessage({
+                type: 'tool-call',
+                name,
+                callId,
+                input,
+                ...toTraceFields(source),
+                id: randomUUID()
+            });
+        };
+
+        const emitToolResult = (
+            callId: string,
+            output: unknown,
+            source: Record<string, unknown>,
+            isError: boolean = false
+        ): void => {
+            session.sendCodexMessage({
+                type: 'tool-call-result',
+                callId,
+                output,
+                is_error: isError,
+                ...toTraceFields(source),
+                id: randomUUID()
+            });
+        };
 
         const handleCodexEvent = (msg: Record<string, unknown>) => {
             const msgType = asString(msg.type);
@@ -270,6 +337,23 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     `Result: ${truncatedOutput}${outputText.length > 200 ? '...' : ''}`,
                     'result'
                 );
+            } else if (msgType === 'patch_apply_begin') {
+                const changes = asRecord(msg.changes) ?? {};
+                const changeCount = Object.keys(changes).length;
+                const filesMsg = changeCount === 1 ? '1 file' : `${changeCount} files`;
+                messageBuffer.addMessage(`Modifying ${filesMsg}...`, 'tool');
+            } else if (msgType === 'patch_apply_end') {
+                const stdout = asString(msg.stdout);
+                const stderr = asString(msg.stderr);
+                const success = Boolean(msg.success);
+
+                if (success) {
+                    const message = stdout || 'Files modified successfully';
+                    messageBuffer.addMessage(message.substring(0, 200), 'result');
+                } else {
+                    const errorMsg = stderr || 'Failed to modify files';
+                    messageBuffer.addMessage(`Error: ${errorMsg.substring(0, 200)}`, 'result');
+                }
             } else if (msgType === 'task_started') {
                 messageBuffer.addMessage('Starting task...', 'status');
             } else if (msgType === 'task_complete') {
@@ -301,6 +385,19 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     logger.debug('thinking completed');
                     session.onThinkingChange(false);
                 }
+
+                const turnId = asString(msg.turn_id ?? msg.turnId);
+                if (turnId) {
+                    const planCallId = planCallIdByTurn.get(turnId);
+                    if (planCallId) {
+                        emitToolResult(planCallId, {
+                            status: msgType,
+                            error: asString(msg.error)
+                        }, msg, msgType === 'task_failed');
+                        planCallIdByTurn.delete(turnId);
+                    }
+                }
+
                 diffProcessor.reset();
                 appServerEventConverter?.reset();
             }
@@ -325,96 +422,157 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     session.sendCodexMessage({
                         type: 'message',
                         message,
+                        ...toTraceFields(msg),
                         id: randomUUID()
                     });
                 }
             }
+
+            if (msgType === 'turn_plan_updated') {
+                const turnId = asString(msg.turn_id ?? msg.turnId) ?? randomUUID();
+                const callId = `turn-plan:${turnId}`;
+                planCallIdByTurn.set(turnId, callId);
+                emitToolCall('ExitPlanMode', callId, {
+                    explanation: msg.explanation ?? null,
+                    plan: msg.plan ?? [],
+                    updated_from: 'turn/plan/updated'
+                }, msg);
+            }
+
+            if (msgType === 'agent_plan_delta') {
+                const callId = extractCallId(msg, 'plan-delta');
+                const turnId = asString(msg.turn_id ?? msg.turnId);
+                if (turnId && !planCallIdByTurn.has(turnId)) {
+                    planCallIdByTurn.set(turnId, callId);
+                }
+                emitToolCall('ExitPlanMode', callId, {
+                    plan: msg.plan_text ?? msg.delta ?? '',
+                    delta: msg.delta ?? '',
+                    updated_from: 'item/plan/delta'
+                }, msg);
+            }
+
+            if (msgType === 'plan_item_started') {
+                const callId = extractCallId(msg, 'plan-item');
+                emitToolCall('ExitPlanMode', callId, {
+                    plan: msg.text ?? '',
+                    updated_from: 'item/started(plan)'
+                }, msg);
+            }
+
+            if (msgType === 'plan_item_completed') {
+                const callId = extractCallId(msg, 'plan-item');
+                emitToolResult(callId, {
+                    plan: msg.text ?? '',
+                    status: msg.status ?? 'completed'
+                }, msg);
+            }
+
             if (msgType === 'exec_command_begin' || msgType === 'exec_approval_request') {
-                const callId = asString(msg.call_id ?? msg.callId);
-                if (callId) {
-                    const inputs: Record<string, unknown> = { ...msg };
-                    delete inputs.type;
-                    delete inputs.call_id;
-                    delete inputs.callId;
-
-                    session.sendCodexMessage({
-                        type: 'tool-call',
-                        name: 'CodexBash',
-                        callId: callId,
-                        input: inputs,
-                        id: randomUUID()
-                    });
-                }
+                const callId = extractCallId(msg, 'exec');
+                emitToolCall('CodexBash', callId, stripEnvelopeFields(msg), msg);
             }
+
             if (msgType === 'exec_command_end') {
-                const callId = asString(msg.call_id ?? msg.callId);
-                if (callId) {
-                    const output: Record<string, unknown> = { ...msg };
-                    delete output.type;
-                    delete output.call_id;
-                    delete output.callId;
-
-                    session.sendCodexMessage({
-                        type: 'tool-call-result',
-                        callId: callId,
-                        output,
-                        id: randomUUID()
-                    });
-                }
+                const callId = extractCallId(msg, 'exec');
+                emitToolResult(callId, stripEnvelopeFields(msg), msg, Boolean(msg.error));
             }
+
             if (msgType === 'token_count') {
                 session.sendCodexMessage({
                     ...msg,
                     id: randomUUID()
                 });
             }
+
             if (msgType === 'patch_apply_begin') {
-                const callId = asString(msg.call_id ?? msg.callId);
-                if (callId) {
-                    const changes = asRecord(msg.changes) ?? {};
-                    const changeCount = Object.keys(changes).length;
-                    const filesMsg = changeCount === 1 ? '1 file' : `${changeCount} files`;
-                    messageBuffer.addMessage(`Modifying ${filesMsg}...`, 'tool');
-
-                    session.sendCodexMessage({
-                        type: 'tool-call',
-                        name: 'CodexPatch',
-                        callId: callId,
-                        input: {
-                            auto_approved: msg.auto_approved ?? msg.autoApproved,
-                            changes
-                        },
-                        id: randomUUID()
-                    });
-                }
+                const callId = extractCallId(msg, 'patch');
+                emitToolCall('CodexPatch', callId, stripEnvelopeFields(msg), msg);
             }
+
+            if (msgType === 'patch_apply_delta') {
+                const callId = extractCallId(msg, 'patch');
+                emitToolResult(callId, {
+                    stream: true,
+                    delta: msg.delta ?? '',
+                    status: msg.status ?? 'in_progress'
+                }, msg);
+            }
+
             if (msgType === 'patch_apply_end') {
-                const callId = asString(msg.call_id ?? msg.callId);
-                if (callId) {
-                    const stdout = asString(msg.stdout);
-                    const stderr = asString(msg.stderr);
-                    const success = Boolean(msg.success);
-
-                    if (success) {
-                        const message = stdout || 'Files modified successfully';
-                        messageBuffer.addMessage(message.substring(0, 200), 'result');
-                    } else {
-                        const errorMsg = stderr || 'Failed to modify files';
-                        messageBuffer.addMessage(`Error: ${errorMsg.substring(0, 200)}`, 'result');
-                    }
-
-                    session.sendCodexMessage({
-                        type: 'tool-call-result',
-                        callId: callId,
-                        output: {
-                            stdout,
-                            stderr,
-                            success
-                        },
-                        id: randomUUID()
-                    });
-                }
+                const callId = extractCallId(msg, 'patch');
+                emitToolResult(callId, stripEnvelopeFields(msg), msg, !Boolean(msg.success));
             }
+
+            if (msgType === 'mcp_tool_call_begin') {
+                const callId = extractCallId(msg, 'mcp');
+                const toolName = asString(msg.name) ?? 'mcp_tool_call';
+                emitToolCall(toolName, callId, msg.input ?? stripEnvelopeFields(msg), msg);
+            }
+
+            if (msgType === 'mcp_tool_call_end') {
+                const callId = extractCallId(msg, 'mcp');
+                emitToolResult(callId, msg.output ?? { error: msg.error ?? null }, msg, Boolean(msg.error));
+            }
+
+            if (msgType === 'collab_tool_call_begin') {
+                const callId = extractCallId(msg, 'collab');
+                const toolName = asString(msg.name) ?? 'collab_tool_call';
+                emitToolCall(toolName, callId, msg.input ?? stripEnvelopeFields(msg), msg);
+            }
+
+            if (msgType === 'collab_tool_call_end') {
+                const callId = extractCallId(msg, 'collab');
+                emitToolResult(callId, msg.output ?? { error: msg.error ?? null }, msg, Boolean(msg.error));
+            }
+
+            if (msgType === 'web_search_begin') {
+                const callId = extractCallId(msg, 'web-search');
+                emitToolCall('web_search', callId, msg.input ?? stripEnvelopeFields(msg), msg);
+            }
+
+            if (msgType === 'web_search_end') {
+                const callId = extractCallId(msg, 'web-search');
+                emitToolResult(callId, msg.output ?? { error: msg.error ?? null }, msg, Boolean(msg.error));
+            }
+
+            if (msgType === 'image_view_begin') {
+                const callId = extractCallId(msg, 'image-view');
+                emitToolCall('image_view', callId, msg.input ?? stripEnvelopeFields(msg), msg);
+            }
+
+            if (msgType === 'image_view_end') {
+                const callId = extractCallId(msg, 'image-view');
+                emitToolResult(callId, msg.output ?? { error: msg.error ?? null }, msg, Boolean(msg.error));
+            }
+
+            if (msgType === 'review_mode_entered') {
+                const callId = extractCallId(msg, 'review');
+                emitToolCall('review_mode', callId, { review: msg.review ?? null }, msg);
+            }
+
+            if (msgType === 'review_mode_exited') {
+                const callId = extractCallId(msg, 'review');
+                emitToolResult(callId, { review: msg.review ?? null }, msg);
+            }
+
+            if (msgType === 'context_compaction_started') {
+                const callId = extractCallId(msg, 'context-compaction');
+                emitToolCall('context_compaction', callId, { status: 'started' }, msg);
+            }
+
+            if (msgType === 'context_compaction_completed') {
+                const callId = extractCallId(msg, 'context-compaction');
+                emitToolResult(callId, { status: 'completed' }, msg);
+            }
+
+            if (msgType === 'task_failed') {
+                session.sendCodexMessage({
+                    ...msg,
+                    id: randomUUID()
+                });
+            }
+
             if (msgType === 'turn_diff') {
                 const diff = asString(msg.unified_diff);
                 if (diff) {
@@ -464,9 +622,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             } catch {}
         }
 
-        const sendReady = () => {
+        function sendReady(): void {
             session.sendSessionEvent({ type: 'ready' });
-        };
+        }
 
         const syncSessionId = () => {
             if (!mcpClient) return;

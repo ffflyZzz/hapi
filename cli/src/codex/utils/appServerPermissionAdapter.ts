@@ -8,6 +8,7 @@ type PermissionDecision = 'approved' | 'approved_for_session' | 'denied' | 'abor
 type PermissionResult = {
     decision: PermissionDecision;
     reason?: string;
+    answers?: Record<string, string[]> | Record<string, { answers: string[] }>;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -34,10 +35,30 @@ function mapDecision(decision: PermissionDecision): { decision: string } {
     }
 }
 
+function normalizeAnswers(
+    answers: Record<string, string[]> | Record<string, { answers: string[] }> | undefined
+): Record<string, string[]> {
+    if (!answers) return {};
+
+    const normalized: Record<string, string[]> = {};
+    for (const [key, value] of Object.entries(answers)) {
+        if (Array.isArray(value)) {
+            normalized[key] = value.filter((entry: unknown): entry is string => typeof entry === 'string');
+            continue;
+        }
+
+        if (value && typeof value === 'object' && Array.isArray(value.answers)) {
+            normalized[key] = value.answers.filter((entry: unknown): entry is string => typeof entry === 'string');
+        }
+    }
+
+    return normalized;
+}
+
 export function registerAppServerPermissionHandlers(args: {
     client: CodexAppServerClient;
     permissionHandler: CodexPermissionHandler;
-    onUserInputRequest?: (request: unknown) => Promise<Record<string, string[]>>;
+    onUserInputRequest?: (request: unknown) => Promise<Record<string, string[]> | Record<string, { answers: string[] }>>;
 }): void {
     const { client, permissionHandler, onUserInputRequest } = args;
 
@@ -80,15 +101,66 @@ export function registerAppServerPermissionHandlers(args: {
     });
 
     client.registerRequestHandler('item/tool/requestUserInput', async (params) => {
-        if (!onUserInputRequest) {
-            logger.debug('[CodexAppServer] No user-input handler registered; cancelling request');
-            return { decision: 'cancel' };
+        if (onUserInputRequest) {
+            const answers = await onUserInputRequest(params);
+            return {
+                decision: 'accept',
+                answers: normalizeAnswers(answers)
+            };
         }
 
-        const answers = await onUserInputRequest(params);
-        return {
-            decision: 'accept',
-            answers
-        };
+        const record = asRecord(params) ?? {};
+        const toolCallId = asString(record.itemId) ?? randomUUID();
+        const result = await permissionHandler.handleToolCall(
+            toolCallId,
+            'request_user_input',
+            record
+        ) as PermissionResult;
+
+        if (result.decision === 'approved' || result.decision === 'approved_for_session') {
+            return {
+                decision: 'accept',
+                answers: normalizeAnswers(result.answers)
+            };
+        }
+
+        if (result.decision === 'denied') {
+            return { decision: 'decline' };
+        }
+
+        logger.debug('[CodexAppServer] requestUserInput cancelled', { itemId: toolCallId });
+        return { decision: 'cancel' };
+    });
+
+    client.registerRequestHandler('tool/requestUserInput', async (params) => {
+        if (onUserInputRequest) {
+            const answers = await onUserInputRequest(params);
+            return {
+                decision: 'accept',
+                answers: normalizeAnswers(answers)
+            };
+        }
+
+        const record = asRecord(params) ?? {};
+        const toolCallId = asString(record.itemId) ?? asString(record.id) ?? randomUUID();
+
+        const result = await permissionHandler.handleToolCall(
+            toolCallId,
+            'request_user_input',
+            record
+        ) as PermissionResult;
+
+        if (result.decision === 'approved' || result.decision === 'approved_for_session') {
+            return {
+                decision: 'accept',
+                answers: normalizeAnswers(result.answers)
+            };
+        }
+
+        if (result.decision === 'denied') {
+            return { decision: 'decline' };
+        }
+
+        return { decision: 'cancel' };
     });
 }

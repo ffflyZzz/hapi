@@ -7,15 +7,11 @@
 ::: code-group
 
 ```bash [npm]
-npm install -g @twsxtd/hapi
-```
-
-```bash [Homebrew]
-brew install tiann/tap/hapi
+npm install -g @aiflyzx/hapi
 ```
 
 ```bash [npx (one-off)]
-npx @twsxtd/hapi
+npx @aiflyzx/hapi
 ```
 
 :::
