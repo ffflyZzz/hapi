@@ -30,12 +30,6 @@ const MESSAGE_PART_COMPONENTS = {
     tools: TOOL_COMPONENTS
 } as const
 
-const CIRCLED_NUMBERS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩']
-
-function toCircledNumber(index: number): string {
-    return CIRCLED_NUMBERS[index - 1] ?? `${index}.`
-}
-
 function getToolTitle(block: ToolCallBlock): string {
     return getToolPresentation({
         toolName: block.tool.name,
@@ -94,15 +88,14 @@ function TimelineNode(props: {
     )
 }
 
-function ToolGroupMessage(props: { blocks: ChatBlock[] }) {
-    const [expanded, setExpanded] = useState(true)
+function ToolGroupMessage(props: { blocks: ChatBlock[]; defaultExpanded: boolean }) {
+    const [expanded, setExpanded] = useState(props.defaultExpanded)
     const items = useMemo(() => {
         const entries: Array<
-            | { type: 'tool'; id: string; index: number; title: string; block: ToolCallBlock }
+            | { type: 'tool'; id: string; title: string; block: ToolCallBlock }
             | { type: 'reasoning'; id: string; text: string }
         > = []
 
-        let toolIndex = 0
         for (const block of props.blocks) {
             if (block.kind === 'agent-reasoning') {
                 const reasoningText = normalizeReasoningText(block.text)
@@ -124,11 +117,9 @@ function ToolGroupMessage(props: { blocks: ChatBlock[] }) {
             }
 
             if (block.kind === 'tool-call') {
-                toolIndex += 1
                 entries.push({
                     type: 'tool',
                     id: `tool:${block.id}`,
-                    index: toolIndex,
                     title: getToolTitle(block),
                     block
                 })
@@ -175,7 +166,7 @@ function ToolGroupMessage(props: { blocks: ChatBlock[] }) {
                                     <TimelineNode key={item.id} showConnector={showConnector}>
                                         <div className="min-w-0 flex-1 pb-2">
                                             <div className="mb-1 pl-0.5 text-xs font-medium text-[var(--app-hint)]">
-                                                {toCircledNumber(item.index)} {item.title}
+                                                {item.title}
                                             </div>
                                             <HappyToolBlock block={item.block} />
                                         </div>
@@ -218,9 +209,12 @@ export function HappyAssistantMessage() {
     }
 
     if (toolGroupBlocks && toolGroupBlocks.length > 0) {
+        const isLastToolGroup = custom?.isLastToolGroup === true
+        const thinking = custom?.thinking === true
+        const defaultExpanded = isLastToolGroup && thinking
         return (
             <MessagePrimitive.Root className="py-1 min-w-0 max-w-full overflow-x-hidden">
-                <ToolGroupMessage blocks={toolGroupBlocks} />
+                <ToolGroupMessage blocks={toolGroupBlocks} defaultExpanded={defaultExpanded} />
             </MessagePrimitive.Root>
         )
     }

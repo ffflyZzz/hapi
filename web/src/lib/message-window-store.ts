@@ -205,26 +205,60 @@ function buildState(
     }
 }
 
+function countVisibleMessages(messages: DecryptedMessage[]): number {
+    let count = 0
+    for (const message of messages) {
+        if (normalizeDecryptedMessage(message) !== null) {
+            count += 1
+        }
+    }
+    return count
+}
+
 function trimVisible(messages: DecryptedMessage[], mode: 'append' | 'prepend'): DecryptedMessage[] {
-    if (messages.length <= VISIBLE_WINDOW_SIZE) {
+    if (countVisibleMessages(messages) <= VISIBLE_WINDOW_SIZE) {
         return messages
     }
     if (mode === 'prepend') {
-        return messages.slice(0, VISIBLE_WINDOW_SIZE)
+        // Scan from the start, collect until we have VISIBLE_WINDOW_SIZE visible messages
+        let visibleCount = 0
+        for (let idx = 0; idx < messages.length; idx += 1) {
+            if (normalizeDecryptedMessage(messages[idx]!) !== null) {
+                visibleCount += 1
+            }
+            if (visibleCount >= VISIBLE_WINDOW_SIZE) {
+                return messages.slice(0, idx + 1)
+            }
+        }
+        return messages
     }
 
-    const latestWindow = messages.slice(messages.length - VISIBLE_WINDOW_SIZE)
+    // mode === 'append': scan from the tail, collect VISIBLE_WINDOW_SIZE visible messages
+    let visibleCount = 0
+    let cutoffIdx = messages.length
+    for (let idx = messages.length - 1; idx >= 0; idx -= 1) {
+        if (normalizeDecryptedMessage(messages[idx]!) !== null) {
+            visibleCount += 1
+        }
+        if (visibleCount >= VISIBLE_WINDOW_SIZE) {
+            cutoffIdx = idx
+            break
+        }
+    }
+
+    const latestWindow = messages.slice(cutoffIdx)
     if (hasAssistantTextMessages(latestWindow)) {
         return latestWindow
     }
 
-    for (let idx = messages.length - 1; idx >= 0; idx -= 1) {
+    // If the latest visible window lacks an assistant text message,
+    // extend backwards to anchor the newest one.
+    for (let idx = cutoffIdx - 1; idx >= 0; idx -= 1) {
         const normalized = normalizeDecryptedMessage(messages[idx]!)
         if (!normalized || normalized.role !== 'agent') {
             continue
         }
         if (normalized.content.some((part) => part.type === 'text')) {
-            // Keep the newest assistant text anchored in view, then all newer tool activity.
             return messages.slice(idx)
         }
     }

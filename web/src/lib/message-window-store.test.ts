@@ -72,6 +72,25 @@ function createPagedApi(messages: DecryptedMessage[]): ApiClient {
     return { getMessages } as unknown as ApiClient
 }
 
+function makeCodexTokenCountMessage(seq: number): DecryptedMessage {
+    return {
+        id: `token-${seq}`,
+        localId: null,
+        createdAt: seq,
+        seq,
+        content: {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'token_count',
+                    tokens: 100
+                }
+            }
+        }
+    }
+}
+
 describe('message-window-store', () => {
     it('keeps latest assistant text visible even after long tool-only tail', async () => {
         clearMessageWindow(SESSION_ID)
@@ -90,5 +109,31 @@ describe('message-window-store', () => {
 
         expect(firstSeq).toBe(50)
         expect(hasAssistantText).toBe(true)
+    })
+
+    it('counts visible messages only, ignoring invisible token_count messages', async () => {
+        const sid = 'session-visible-count'
+        clearMessageWindow(sid)
+
+        // Create 600 raw messages: alternating tool-call and token_count
+        // This gives us 300 visible (tool-call) + 300 invisible (token_count) = 600 raw
+        // Since 300 visible < 400 limit, all messages should be retained
+        const messages: DecryptedMessage[] = []
+        for (let seq = 1; seq <= 600; seq += 1) {
+            if (seq % 2 === 0) {
+                messages.push(makeCodexTokenCountMessage(seq))
+            } else {
+                messages.push(makeCodexToolMessage(seq))
+            }
+        }
+        // Add a text message at the beginning
+        messages[0] = makeCodexTextMessage(1, 'hello')
+
+        const api = createPagedApi(messages)
+        await fetchLatestMessages(api, sid)
+
+        const state = getMessageWindowState(sid)
+        // All 600 raw messages should be retained since only 300 are visible (< 400)
+        expect(state.messages.length).toBe(600)
     })
 })

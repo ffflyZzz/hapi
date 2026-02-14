@@ -17,6 +17,8 @@ export type HappyChatMessageMetadata = {
     source?: CliOutputBlock['source']
     attachments?: AttachmentMetadata[]
     groupBlocks?: ChatBlock[]
+    isLastToolGroup?: boolean
+    thinking?: boolean
 }
 
 type ToolGroupBlock = {
@@ -24,6 +26,8 @@ type ToolGroupBlock = {
     id: string
     createdAt: number
     blocks: ChatBlock[]
+    isLast: boolean
+    thinking: boolean
 }
 
 type RenderBlock = ChatBlock | ToolGroupBlock
@@ -37,7 +41,7 @@ function shouldGroupToolBlocks(blocks: ChatBlock[]): boolean {
     return blocks.some((block) => block.kind === 'tool-call')
 }
 
-function groupConsecutiveToolBlocks(blocks: readonly ChatBlock[]): RenderBlock[] {
+function groupConsecutiveToolBlocks(blocks: readonly ChatBlock[], thinking: boolean): RenderBlock[] {
     const grouped: RenderBlock[] = []
     let idx = 0
 
@@ -61,10 +65,20 @@ function groupConsecutiveToolBlocks(blocks: readonly ChatBlock[]): RenderBlock[]
                 kind: 'tool-group',
                 id: run[0]!.id,
                 createdAt: run[0]!.createdAt,
-                blocks: run
+                blocks: run,
+                isLast: false,
+                thinking
             })
         } else {
             grouped.push(...run)
+        }
+    }
+
+    // Mark the last tool-group
+    for (let i = grouped.length - 1; i >= 0; i--) {
+        if (grouped[i].kind === 'tool-group') {
+            ;(grouped[i] as ToolGroupBlock).isLast = true
+            break
         }
     }
 
@@ -82,7 +96,9 @@ function toThreadMessageLike(block: RenderBlock): ThreadMessageLike {
             metadata: {
                 custom: {
                     kind: 'tool-group',
-                    groupBlocks: block.blocks
+                    groupBlocks: block.blocks,
+                    isLastToolGroup: block.isLast,
+                    thinking: block.thinking
                 } satisfies HappyChatMessageMetadata
             }
         }
@@ -113,7 +129,7 @@ function toThreadMessageLike(block: RenderBlock): ThreadMessageLike {
 
     if (block.kind === 'agent-text') {
         const messageId = `assistant:${block.id}`
-        return {
+        const msg: ThreadMessageLike = {
             role: 'assistant',
             id: messageId,
             createdAt: new Date(block.createdAt),
@@ -122,6 +138,8 @@ function toThreadMessageLike(block: RenderBlock): ThreadMessageLike {
                 custom: { kind: 'assistant' } satisfies HappyChatMessageMetadata
             }
         }
+        ;(msg as Record<string, unknown>).convertConfig = { joinStrategy: 'none' }
+        return msg
     }
 
     if (block.kind === 'agent-reasoning') {
@@ -251,8 +269,8 @@ export function useHappyRuntime(props: {
     allowSendWhenInactive?: boolean
 }) {
     const groupedBlocks = useMemo(
-        () => groupConsecutiveToolBlocks(props.blocks),
-        [props.blocks]
+        () => groupConsecutiveToolBlocks(props.blocks, props.session.thinking),
+        [props.blocks, props.session.thinking]
     )
 
     // Use cached message converter for performance optimization
