@@ -21,6 +21,7 @@ export type MessageWindowState = {
 export const VISIBLE_WINDOW_SIZE = 400
 export const PENDING_WINDOW_SIZE = 200
 const PAGE_SIZE = 50
+const MAX_LATEST_FETCH_PAGES = 80
 const PENDING_OVERFLOW_WARNING = 'New messages arrived while you were away. Scroll to bottom to refresh.'
 
 type InternalState = MessageWindowState & {
@@ -211,7 +212,24 @@ function trimVisible(messages: DecryptedMessage[], mode: 'append' | 'prepend'): 
     if (mode === 'prepend') {
         return messages.slice(0, VISIBLE_WINDOW_SIZE)
     }
-    return messages.slice(messages.length - VISIBLE_WINDOW_SIZE)
+
+    const latestWindow = messages.slice(messages.length - VISIBLE_WINDOW_SIZE)
+    if (hasAssistantTextMessages(latestWindow)) {
+        return latestWindow
+    }
+
+    for (let idx = messages.length - 1; idx >= 0; idx -= 1) {
+        const normalized = normalizeDecryptedMessage(messages[idx]!)
+        if (!normalized || normalized.role !== 'agent') {
+            continue
+        }
+        if (normalized.content.some((part) => part.type === 'text')) {
+            // Keep the newest assistant text anchored in view, then all newer tool activity.
+            return messages.slice(idx)
+        }
+    }
+
+    return latestWindow
 }
 
 function trimPending(
@@ -267,6 +285,39 @@ function mergeIntoPending(
     const pendingOverflowVisibleCount = prev.pendingOverflowVisibleCount + droppedVisible
     const warning = droppedVisible > 0 && !prev.warning ? PENDING_OVERFLOW_WARNING : prev.warning
     return { pending, pendingVisibleCount, pendingOverflowCount, pendingOverflowVisibleCount, warning }
+}
+
+function hasAssistantTextMessages(messages: DecryptedMessage[]): boolean {
+    for (const message of messages) {
+        const normalized = normalizeDecryptedMessage(message)
+        if (!normalized) continue
+        if (normalized.role !== 'agent') continue
+        if (normalized.content.some((part) => part.type === 'text')) return true
+    }
+    return false
+}
+
+async function fetchLatestWindow(
+    api: ApiClient,
+    sessionId: string
+): Promise<{ messages: DecryptedMessage[]; hasMore: boolean }> {
+    let beforeSeq: number | null = null
+    let hasMore = false
+    let allMessages: DecryptedMessage[] = []
+
+    for (let page = 0; page < MAX_LATEST_FETCH_PAGES; page += 1) {
+        const response = await api.getMessages(sessionId, { limit: PAGE_SIZE, beforeSeq })
+        allMessages = mergeMessages(response.messages, allMessages)
+        hasMore = response.page.hasMore
+
+        if (hasAssistantTextMessages(allMessages) || !response.page.hasMore || response.page.nextBeforeSeq === null) {
+            break
+        }
+
+        beforeSeq = response.page.nextBeforeSeq
+    }
+
+    return { messages: allMessages, hasMore }
 }
 
 export function getMessageWindowState(sessionId: string): MessageWindowState {
@@ -325,7 +376,7 @@ export async function fetchLatestMessages(api: ApiClient, sessionId: string): Pr
     updateState(sessionId, (prev) => buildState(prev, { isLoading: true, warning: null }))
 
     try {
-        const response = await api.getMessages(sessionId, { limit: PAGE_SIZE, beforeSeq: null })
+        const response = await fetchLatestWindow(api, sessionId)
         updateState(sessionId, (prev) => {
             if (prev.atBottom) {
                 const merged = mergeMessages(prev.messages, [...prev.pending, ...response.messages])
@@ -336,7 +387,7 @@ export async function fetchLatestMessages(api: ApiClient, sessionId: string): Pr
                     pendingOverflowCount: 0,
                     pendingVisibleCount: 0,
                     pendingOverflowVisibleCount: 0,
-                    hasMore: response.page.hasMore,
+                    hasMore: response.hasMore,
                     isLoading: false,
                     warning: null,
                 })

@@ -55,6 +55,12 @@ export function reduceChatBlocks(
         : null
 
     for (const [id, entry] of permissionsById) {
+        // Completed/denied requests should come from transcript events.
+        // Injecting them from agentState reorders history and can show stale tool cards.
+        if (entry.permission.status !== 'pending') {
+            continue
+        }
+
         if (toolIdsInMessages.has(id)) continue
         if (rootResult.toolBlocksById.has(id)) continue
 
@@ -74,20 +80,7 @@ export function reduceChatBlocks(
             description: null,
             permission: entry.permission
         })
-
-        if (entry.permission.status === 'approved') {
-            block.tool.state = 'completed'
-            block.tool.completedAt = entry.permission.completedAt ?? createdAt
-            if (block.tool.result === undefined) {
-                block.tool.result = 'Approved'
-            }
-        } else if (entry.permission.status === 'denied' || entry.permission.status === 'canceled') {
-            block.tool.state = 'error'
-            block.tool.completedAt = entry.permission.completedAt ?? createdAt
-            if (block.tool.result === undefined && entry.permission.reason) {
-                block.tool.result = { error: entry.permission.reason }
-            }
-        }
+        block.tool.state = 'pending'
     }
 
     // Calculate latest usage from messages (find the most recent message with usage data)

@@ -161,7 +161,6 @@ function HappyNestedBlockList(props: {
 }
 
 export function HappyToolMessage(props: ToolCallMessagePartProps) {
-    const ctx = useHappyChatContext()
     const artifact = props.artifact
 
     if (!isToolCallBlock(artifact)) {
@@ -201,7 +200,12 @@ export function HappyToolMessage(props: ToolCallMessagePartProps) {
         )
     }
 
-    const block = artifact
+    return <HappyToolBlock block={artifact} />
+}
+
+export function HappyToolBlock(props: { block: ToolCallBlock }) {
+    const ctx = useHappyChatContext()
+    const block = props.block
     const isTask = block.tool.name === 'Task'
     const taskChildren = isTask ? splitTaskChildren(block) : null
 

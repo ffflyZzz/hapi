@@ -8,7 +8,7 @@ import type { AgentEvent, ToolCallBlock } from '@/chat/types'
 import type { AttachmentMetadata, MessageStatus as HappyMessageStatus, Session } from '@/types/api'
 
 export type HappyChatMessageMetadata = {
-    kind: 'user' | 'assistant' | 'tool' | 'event' | 'cli-output'
+    kind: 'user' | 'assistant' | 'tool' | 'event' | 'cli-output' | 'tool-group'
     status?: HappyMessageStatus
     localId?: string | null
     originalText?: string
@@ -16,9 +16,82 @@ export type HappyChatMessageMetadata = {
     event?: AgentEvent
     source?: CliOutputBlock['source']
     attachments?: AttachmentMetadata[]
+    groupBlocks?: ChatBlock[]
 }
 
-function toThreadMessageLike(block: ChatBlock): ThreadMessageLike {
+type ToolGroupBlock = {
+    kind: 'tool-group'
+    id: string
+    createdAt: number
+    blocks: ChatBlock[]
+}
+
+type RenderBlock = ChatBlock | ToolGroupBlock
+
+function isToolGroupCandidate(block: ChatBlock): boolean {
+    return block.kind === 'tool-call' || block.kind === 'agent-reasoning'
+}
+
+function shouldGroupToolBlocks(blocks: ChatBlock[]): boolean {
+    if (blocks.length < 2) return false
+    return blocks.some((block) => block.kind === 'tool-call')
+}
+
+function groupConsecutiveToolBlocks(blocks: readonly ChatBlock[]): RenderBlock[] {
+    const grouped: RenderBlock[] = []
+    let idx = 0
+
+    while (idx < blocks.length) {
+        const current = blocks[idx]
+        if (!isToolGroupCandidate(current)) {
+            grouped.push(current)
+            idx += 1
+            continue
+        }
+
+        const run: ChatBlock[] = [current]
+        idx += 1
+        while (idx < blocks.length && isToolGroupCandidate(blocks[idx])) {
+            run.push(blocks[idx])
+            idx += 1
+        }
+
+        if (shouldGroupToolBlocks(run)) {
+            grouped.push({
+                kind: 'tool-group',
+                id: run[0]!.id,
+                createdAt: run[0]!.createdAt,
+                blocks: run
+            })
+        } else {
+            grouped.push(...run)
+        }
+    }
+
+    return grouped
+}
+
+function toThreadMessageLike(block: RenderBlock): ThreadMessageLike {
+    if (block.kind === 'tool-group') {
+        const messageId = `tool-group:${block.id}`
+        const msg: ThreadMessageLike = {
+            role: 'assistant',
+            id: messageId,
+            createdAt: new Date(block.createdAt),
+            content: [{ type: 'text', text: '' }],
+            metadata: {
+                custom: {
+                    kind: 'tool-group',
+                    groupBlocks: block.blocks
+                } satisfies HappyChatMessageMetadata
+            }
+        }
+        // Prevent assistant-ui from merging this message with subsequent assistant messages.
+        // convertConfig is supported at runtime but not in the ThreadMessageLike type definition.
+        ;(msg as Record<string, unknown>).convertConfig = { joinStrategy: 'none' }
+        return msg
+    }
+
     if (block.kind === 'user-text') {
         const messageId = `user:${block.id}`
         return {
@@ -177,11 +250,16 @@ export function useHappyRuntime(props: {
     attachmentAdapter?: AttachmentAdapter
     allowSendWhenInactive?: boolean
 }) {
+    const groupedBlocks = useMemo(
+        () => groupConsecutiveToolBlocks(props.blocks),
+        [props.blocks]
+    )
+
     // Use cached message converter for performance optimization
     // This prevents re-converting all messages on every render
-    const convertedMessages = useExternalMessageConverter<ChatBlock>({
+    const convertedMessages = useExternalMessageConverter<RenderBlock>({
         callback: toThreadMessageLike,
-        messages: props.blocks as ChatBlock[],
+        messages: groupedBlocks as RenderBlock[],
         isRunning: props.session.thinking,
     })
 

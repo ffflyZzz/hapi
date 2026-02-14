@@ -145,21 +145,41 @@ function renderExitPlanModeInput(input: unknown): ReactNode | null {
 function extractTextFromToolResult(result: unknown, depth: number = 0): string | null {
     if (depth > 2) return null
     if (typeof result === 'string') return result
+    if (Array.isArray(result)) {
+        const parts = result
+            .map((item) => extractTextFromToolResult(item, depth + 1))
+            .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+        return parts.length > 0 ? parts.join('\n') : null
+    }
     if (!isObject(result)) return null
 
     if (typeof result.content === 'string') return result.content
     if (typeof result.text === 'string') return result.text
     if (typeof result.output === 'string') return result.output
+    if (typeof result.formatted_output === 'string') return result.formatted_output
+    if (typeof result.aggregated_output === 'string') return result.aggregated_output
     if (typeof result.stdout === 'string') return result.stdout
     if (typeof result.stderr === 'string') return result.stderr
     if (typeof result.error === 'string') return result.error
     if (typeof result.message === 'string') return result.message
+
+    const contentArray = Array.isArray(result.content) ? result.content : null
+    if (contentArray) {
+        const parts = contentArray
+            .map((item) => extractTextFromToolResult(item, depth + 1))
+            .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+        if (parts.length > 0) return parts.join('\n')
+    }
 
     if (isObject(result.result)) {
         const nested = extractTextFromToolResult(result.result, depth + 1)
         if (nested) return nested
     }
     if (isObject(result.data)) {
+        const nested = extractTextFromToolResult(result.data, depth + 1)
+        if (nested) return nested
+    }
+    if (Array.isArray(result.data)) {
         const nested = extractTextFromToolResult(result.data, depth + 1)
         if (nested) return nested
     }

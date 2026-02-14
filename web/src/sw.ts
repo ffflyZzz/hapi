@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { precacheAndRoute } from 'workbox-precaching'
 import { registerRoute } from 'workbox-routing'
-import { CacheFirst, NetworkFirst } from 'workbox-strategies'
+import { CacheFirst } from 'workbox-strategies'
 import { ExpirationPlugin } from 'workbox-expiration'
 
 declare const self: ServiceWorkerGlobalScope & {
@@ -22,48 +22,6 @@ type PushPayload = {
 }
 
 precacheAndRoute(self.__WB_MANIFEST)
-
-registerRoute(
-    ({ url }) => url.pathname === '/api/sessions',
-    new NetworkFirst({
-        cacheName: 'api-sessions',
-        networkTimeoutSeconds: 10,
-        plugins: [
-            new ExpirationPlugin({
-                maxEntries: 10,
-                maxAgeSeconds: 60 * 5
-            })
-        ]
-    })
-)
-
-registerRoute(
-    ({ url }) => /^\/api\/sessions\/[^/]+$/.test(url.pathname),
-    new NetworkFirst({
-        cacheName: 'api-session-detail',
-        networkTimeoutSeconds: 10,
-        plugins: [
-            new ExpirationPlugin({
-                maxEntries: 20,
-                maxAgeSeconds: 60 * 5
-            })
-        ]
-    })
-)
-
-registerRoute(
-    ({ url }) => url.pathname === '/api/machines',
-    new NetworkFirst({
-        cacheName: 'api-machines',
-        networkTimeoutSeconds: 10,
-        plugins: [
-            new ExpirationPlugin({
-                maxEntries: 5,
-                maxAgeSeconds: 60 * 10
-            })
-        ]
-    })
-)
 
 registerRoute(
     /^https:\/\/cdn\.socket\.io\/.*/,

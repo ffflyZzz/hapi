@@ -98,9 +98,11 @@ export class ApiClient {
             headers.set('content-type', 'application/json')
         }
 
+        const method = (init?.method ?? 'GET').toUpperCase()
         const res = await fetch(this.buildUrl(path), {
             ...init,
-            headers
+            headers,
+            cache: method === 'GET' ? 'no-store' : init?.cache
         })
 
         if (res.status === 401) {
