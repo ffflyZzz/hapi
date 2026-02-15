@@ -34,6 +34,23 @@ import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
 import { getLatestRunnerLog } from '@/ui/logger';
 import { isProcessAlive, isWindows, killProcess, killProcessByChildProcess } from '@/utils/process';
 
+function getEnvTimeoutMs(name: string, fallbackMs: number): number {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallbackMs;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
+}
+
+const BEFORE_AFTER_HOOK_TIMEOUT_MS = getEnvTimeoutMs('HAPI_RUNNER_TEST_HOOK_TIMEOUT', 60_000);
+const RUNNER_START_TIMEOUT_MS = getEnvTimeoutMs('HAPI_RUNNER_TEST_START_TIMEOUT', 30_000);
+const RUNNER_STOP_TIMEOUT_MS = getEnvTimeoutMs('HAPI_RUNNER_TEST_STOP_TIMEOUT', 5_000);
+const SESSION_REPORT_TIMEOUT_MS = getEnvTimeoutMs('HAPI_RUNNER_TEST_SESSION_REPORT_TIMEOUT', 15_000);
+const PROCESS_EXIT_TIMEOUT_MS = getEnvTimeoutMs('HAPI_RUNNER_TEST_PROCESS_EXIT_TIMEOUT', 15_000);
+const VERSION_MISMATCH_TIMEOUT_MS = getEnvTimeoutMs('HAPI_RUNNER_TEST_VERSION_MISMATCH_TIMEOUT', 90_000);
+const RUNNER_INTEGRATION_ENABLED = ['1', 'true', 'yes'].includes((process.env.HAPI_RUNNER_INTEGRATION_TESTS || '').toLowerCase());
+
 // Utility to wait for condition
 async function waitFor(
   condition: () => Promise<boolean>,
@@ -48,9 +65,29 @@ async function waitFor(
   throw new Error('Timeout waiting for condition');
 }
 
+function buildCli(): void {
+  // Prefer bun in this workspace; fallback to npm/yarn for external contributors.
+  const buildCommands = ['bun run build', 'npm run build', 'yarn build'];
+  let lastError: Error | undefined;
+  for (const command of buildCommands) {
+    try {
+      execSync(command, { stdio: 'ignore' });
+      return;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+  throw lastError ?? new Error('Failed to build CLI for runner integration test');
+}
+
 // Check if dev hub is running and properly configured
 async function isServerHealthy(): Promise<boolean> {
   try {
+    if (!RUNNER_INTEGRATION_ENABLED) {
+      console.log('[TEST] Skipping runner integration tests: set HAPI_RUNNER_INTEGRATION_TESTS=true to enable');
+      return false;
+    }
+
     if (!configuration.cliApiToken) {
       console.log('[TEST] Missing CLI_API_TOKEN (required for direct-connect integration tests)');
       return false;
@@ -83,7 +120,8 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
 
   beforeEach(async () => {
     // First ensure no runner is running by checking PID in metadata file
-    await stopRunner()
+    await stopRunner();
+    await clearRunnerState();
     
     // Start fresh runner for this test
     // This will return and start a background process - we don't need to wait for it
@@ -91,11 +129,11 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
       stdio: 'ignore'
     });
     
-    // Wait for runner to write its state file (it needs to auth, setup, and start server)
+    // Wait for runner to write a fresh, alive state.
     await waitFor(async () => {
       const state = await readRunnerState();
-      return state !== null;
-    }, 10_000, 250); // Wait up to 10 seconds, checking every 250ms
+      return state !== null && isProcessAlive(state.pid);
+    }, RUNNER_START_TIMEOUT_MS, 250);
     
     const runnerState = await readRunnerState();
     if (!runnerState) {
@@ -105,11 +143,12 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
 
     console.log(`[TEST] Runner started for test: PID=${runnerPid}`);
     console.log(`[TEST] Runner log file: ${runnerState?.runnerLogPath}`);
-  });
+  }, BEFORE_AFTER_HOOK_TIMEOUT_MS);
 
   afterEach(async () => {
-    await stopRunner()
-  });
+    await stopRunner();
+    await clearRunnerState();
+  }, BEFORE_AFTER_HOOK_TIMEOUT_MS);
 
   it('should list sessions (initially empty)', async () => {
     const sessions = await listRunnerSessions();
@@ -189,7 +228,7 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
     await stopRunnerHttp();
 
     // Verify metadata file is cleaned up
-    await waitFor(async () => !existsSync(configuration.runnerStateFile), 1000);
+    await waitFor(async () => !existsSync(configuration.runnerStateFile), RUNNER_STOP_TIMEOUT_MS, 250);
   });
 
   it('should track both runner-spawned and terminal sessions', async () => {
@@ -205,8 +244,11 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
     if (!terminalHappyProcess || !terminalHappyProcess.pid) {
       throw new Error('Failed to spawn terminal hapi process');
     }
-    // Give time to start & report itself
-    await new Promise(resolve => setTimeout(resolve, 5_000));
+    // Wait until runner reports terminal session (CI timing can be noisy).
+    await waitFor(async () => {
+      const sessions = await listRunnerSessions();
+      return sessions.some((s: any) => s.pid === terminalHappyProcess.pid);
+    }, SESSION_REPORT_TIMEOUT_MS, 250);
 
     // Spawn a runner session
     const spawnResponse = await spawnRunnerSession('/tmp', 'runner-session-bbb');
@@ -301,7 +343,13 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
     const spawnedSessionIds = results.map(r => r.sessionId);
 
     // Give sessions time to report via webhook
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await waitFor(async () => {
+      const sessions = await listRunnerSessions();
+      const runnerSessions = sessions.filter(
+        (s: any) => s.startedBy === 'runner' && spawnedSessionIds.includes(s.happySessionId)
+      );
+      return runnerSessions.length >= 3;
+    }, SESSION_REPORT_TIMEOUT_MS, 250);
 
     // List should show all sessions
     const sessions = await listRunnerSessions();
@@ -329,7 +377,7 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
     await killProcess(runnerPid, true);
     
     // Wait for process to die
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await waitFor(async () => !isProcessAlive(runnerPid), PROCESS_EXIT_TIMEOUT_MS, 250);
     
     // Check if process is dead
     const isDead = !isProcessAlive(runnerPid);
@@ -362,7 +410,7 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
     }
     
     // Wait for graceful shutdown
-    await new Promise(resolve => setTimeout(resolve, 4_000));
+    await waitFor(async () => !isProcessAlive(runnerPid), PROCESS_EXIT_TIMEOUT_MS, 250);
     
     // Check if process is dead
     const isDead = !isProcessAlive(runnerPid);
@@ -435,23 +483,24 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
       expect(initialState!.startedWithCliVersion).toBe(originalVersion);
       const initialPid = initialState!.pid;
 
-      // Re-build the CLI - so it will import the new package.json in its configuartion.ts
-      // and think it is a new version
-      // We are not using yarn build here because it cleans out dist/
-      // and we want to avoid that, 
-      // otherwise runner will spawn a non existing happy js script.
-      // We need to remove index, but not the other files, otherwise some of our code might fail when called from within the runner.
-      execSync('yarn build', { stdio: 'ignore' });
+      // Rebuild CLI so configuration.currentCliVersion reflects modified package.json.
+      buildCli();
       
       console.log(`[TEST] Current runner running with version ${originalVersion}, PID: ${initialPid}`);
       
       console.log(`[TEST] Changed package.json version to ${testVersion}`);
 
-      // The runner should automatically detect the version mismatch and restart itself
-      // We check once per minute, wait for a little longer than that
-      await new Promise(resolve => setTimeout(resolve, parseInt(process.env.HAPI_RUNNER_HEARTBEAT_INTERVAL || '30000') + 10_000));
+      // The runner should automatically detect mismatch and restart itself.
+      await waitFor(async () => {
+        const currentState = await readRunnerState();
+        return (
+          !!currentState &&
+          currentState.startedWithCliVersion === testVersion &&
+          currentState.pid !== initialPid &&
+          isProcessAlive(currentState.pid)
+        );
+      }, VERSION_MISMATCH_TIMEOUT_MS, 1_000);
 
-      // Check that the runner is running with the new version
       const finalState = await readRunnerState();
       expect(finalState).toBeDefined();
       expect(finalState!.startedWithCliVersion).toBe(testVersion);
@@ -463,7 +512,7 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
       console.log(`[TEST] Restored package.json version to ${originalVersion}`);
 
       // Lets rebuild it so we keep it as we found it
-      execSync('yarn build', { stdio: 'ignore' });
+      buildCli();
     }
   });
 

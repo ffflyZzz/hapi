@@ -9,7 +9,8 @@
         "build": "vite build && cp dist/index.html dist/404.html",
         "typecheck": "tsc --noEmit",
         "preview": "vite preview",
-        "test": "vitest run"
+        "test": "vitest run",
+        "coverage": "vitest run --coverage"
     },
     "dependencies": {
         "@assistant-ui/react": "^0.11.53",
@@ -44,12 +45,13 @@
         "workbox-window": "^7.4.0"
     },
     "devDependencies": {
+        "@tailwindcss/postcss": "^4.1.18",
         "@testing-library/jest-dom": "^6.6.3",
         "@testing-library/react": "^16.3.0",
         "@types/react": "^19.2.7",
         "@types/react-dom": "^19.2.3",
-        "@tailwindcss/postcss": "^4.1.18",
         "@vitejs/plugin-react": "^5.1.2",
+        "@vitest/coverage-v8": "4.0.16",
         "autoprefixer": "^10.4.23",
         "jsdom": "^26.1.0",
         "postcss": "^8.5.6",
