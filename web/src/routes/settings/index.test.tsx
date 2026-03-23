@@ -5,6 +5,10 @@ import { en } from '@/lib/locales'
 import { PROTOCOL_VERSION } from '@hapi/protocol'
 import SettingsPage from './index'
 
+vi.mock('@hapi/protocol', () => ({
+    PROTOCOL_VERSION: 1,
+}))
+
 // Mock the router hooks
 vi.mock('@tanstack/react-router', () => ({
     useNavigate: () => vi.fn(),
@@ -19,6 +23,30 @@ vi.mock('@/hooks/useFontScale', () => ({
         { value: 0.875, label: '87.5%' },
         { value: 1, label: '100%' },
         { value: 1.125, label: '112.5%' },
+    ],
+}))
+
+vi.mock('@/hooks/useTerminalFontSize', () => ({
+    useTerminalFontSize: () => ({ terminalFontSize: 13, setTerminalFontSize: vi.fn() }),
+    getTerminalFontSizeOptions: () => [
+        { value: 9, label: '9px' },
+        { value: 13, label: '13px' },
+        { value: 17, label: '17px' },
+    ],
+}))
+
+// Mock useTheme hook
+vi.mock('@/hooks/useTheme', () => ({
+    useTheme: () => ({ colorScheme: 'light', colorPreset: 'default', isDark: false, setColorPreset: vi.fn() }),
+    getColorPresetOptions: () => [
+        { value: 'default', labelKey: 'settings.display.colorPreset.default' },
+        { value: 'natural', labelKey: 'settings.display.colorPreset.natural' },
+    ],
+    useAppearance: () => ({ appearance: 'system', setAppearance: vi.fn() }),
+    getAppearanceOptions: () => [
+        { value: 'system', labelKey: 'settings.display.appearance.system' },
+        { value: 'dark', labelKey: 'settings.display.appearance.dark' },
+        { value: 'light', labelKey: 'settings.display.appearance.light' },
     ],
 }))
 
@@ -97,5 +125,24 @@ describe('SettingsPage', () => {
         expect(calledKeys).toContain('settings.about.website')
         expect(calledKeys).toContain('settings.about.appVersion')
         expect(calledKeys).toContain('settings.about.protocolVersion')
+    })
+
+    it('renders the Appearance setting', () => {
+        renderWithProviders(<SettingsPage />)
+        expect(screen.getAllByText('Appearance').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getAllByText('Follow System').length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('uses correct i18n keys for Appearance setting', () => {
+        const spyT = renderWithSpyT(<SettingsPage />)
+        const calledKeys = spyT.mock.calls.map((call) => call[0])
+        expect(calledKeys).toContain('settings.display.appearance')
+        expect(calledKeys).toContain('settings.display.appearance.system')
+    })
+
+    it('renders the Terminal Font Size setting', () => {
+        renderWithProviders(<SettingsPage />)
+        expect(screen.getAllByText('Terminal Font Size').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getAllByText('13px').length).toBeGreaterThanOrEqual(1)
     })
 })

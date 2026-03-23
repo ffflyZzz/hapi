@@ -1,6 +1,7 @@
 import type {
     AttachmentMetadata,
     AuthResponse,
+    CodexCollaborationMode,
     DeleteUploadResponse,
     ListDirectoryResponse,
     FileReadResponse,
@@ -9,7 +10,6 @@ import type {
     MachinePathsExistsResponse,
     MachinesResponse,
     MessagesResponse,
-    ModelMode,
     PermissionMode,
     PushSubscriptionPayload,
     PushUnsubscribePayload,
@@ -315,7 +315,14 @@ export class ApiClient {
         })
     }
 
-    async setModelMode(sessionId: string, model: ModelMode): Promise<void> {
+    async setCollaborationMode(sessionId: string, mode: CodexCollaborationMode): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/collaboration-mode`, {
+            method: 'POST',
+            body: JSON.stringify({ mode })
+        })
+    }
+
+    async setModel(sessionId: string, model: string | null): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/model`, {
             method: 'POST',
             body: JSON.stringify({ model })
@@ -374,15 +381,16 @@ export class ApiClient {
     async spawnSession(
         machineId: string,
         directory: string,
-        agent?: 'claude' | 'codex' | 'gemini' | 'opencode',
+        agent?: 'claude' | 'codex' | 'cursor' | 'gemini' | 'opencode',
         model?: string,
+        modelReasoningEffort?: string,
         yolo?: boolean,
         sessionType?: 'simple' | 'worktree',
         worktreeName?: string
     ): Promise<SpawnResponse> {
         return await this.request<SpawnResponse>(`/api/machines/${encodeURIComponent(machineId)}/spawn`, {
             method: 'POST',
-            body: JSON.stringify({ directory, agent, model, yolo, sessionType, worktreeName })
+            body: JSON.stringify({ directory, agent, model, modelReasoningEffort, yolo, sessionType, worktreeName })
         })
     }
 

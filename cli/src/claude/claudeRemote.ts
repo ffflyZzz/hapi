@@ -10,6 +10,7 @@ import { awaitFileExist } from "@/modules/watcher/awaitFileExist";
 import { systemPrompt } from "./utils/systemPrompt";
 import { PermissionResult } from "./sdk/types";
 import { getHapiBlobsDir } from "@/constants/uploadPaths";
+import { getDefaultClaudeCodePath } from "./sdk/utils";
 
 export async function claudeRemote(opts: {
 
@@ -78,7 +79,16 @@ export async function claudeRemote(opts: {
     process.env.DISABLE_AUTOUPDATER = '1';
 
     // Get initial message
-    const initial = await opts.nextMessage();
+    let initial;
+    try {
+        initial = await opts.nextMessage();
+    } catch (e) {
+        if (e instanceof AbortError) {
+            logger.debug(`[claudeRemote] Aborted during initial message`);
+            return;
+        }
+        throw e;
+    }
     if (!initial) { // No initial message - exit
         return;
     }
@@ -122,7 +132,7 @@ export async function claudeRemote(opts: {
         disallowedTools: initial.mode.disallowedTools,
         canCallTool: (toolName: string, input: unknown, options: { signal: AbortSignal }) => opts.canCallTool(toolName, input, mode, options),
         abort: opts.signal,
-        pathToClaudeCodeExecutable: 'claude',
+        pathToClaudeCodeExecutable: getDefaultClaudeCodePath(),
         settingsPath: opts.hookSettingsPath,
         additionalDirectories: [getHapiBlobsDir()],
     }

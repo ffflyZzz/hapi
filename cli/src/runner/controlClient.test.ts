@@ -1,23 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { hashRunnerCliApiToken } from './runnerIdentity';
 
 const {
     mockReadRunnerState,
     mockClearRunnerState,
+    mockReadSettings,
     mockIsProcessAlive,
     mockKillProcess,
     mockIsBunCompiled,
     mockProjectPath,
     mockExistsSync,
     mockStatSync,
+    mockMkdirSync,
 } = vi.hoisted(() => ({
     mockReadRunnerState: vi.fn(),
     mockClearRunnerState: vi.fn(),
+    mockReadSettings: vi.fn(),
     mockIsProcessAlive: vi.fn(),
     mockKillProcess: vi.fn(),
     mockIsBunCompiled: vi.fn(),
     mockProjectPath: vi.fn(),
     mockExistsSync: vi.fn(),
     mockStatSync: vi.fn(),
+    mockMkdirSync: vi.fn(),
 }));
 
 vi.mock('@/ui/logger', () => ({
@@ -29,6 +34,7 @@ vi.mock('@/ui/logger', () => ({
 vi.mock('@/persistence', () => ({
     readRunnerState: mockReadRunnerState,
     clearRunnerState: mockClearRunnerState,
+    readSettings: mockReadSettings,
 }));
 
 vi.mock('@/utils/process', () => ({
@@ -41,10 +47,15 @@ vi.mock('@/projectPath', () => ({
     projectPath: mockProjectPath,
 }));
 
-vi.mock('node:fs', () => ({
-    existsSync: mockExistsSync,
-    statSync: mockStatSync,
-}));
+vi.mock('node:fs', async () => {
+    const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+    return {
+        ...actual,
+        existsSync: mockExistsSync,
+        statSync: mockStatSync,
+        mkdirSync: mockMkdirSync,
+    };
+});
 
 import {
     checkIfRunnerRunningAndCleanupStaleState,
@@ -63,19 +74,24 @@ describe('runner control client', () => {
 
         mockReadRunnerState.mockReset();
         mockClearRunnerState.mockReset();
+        mockReadSettings.mockReset();
         mockIsProcessAlive.mockReset();
         mockKillProcess.mockReset();
         mockIsBunCompiled.mockReset();
         mockProjectPath.mockReset();
         mockExistsSync.mockReset();
         mockStatSync.mockReset();
+        mockMkdirSync.mockReset();
 
         mockKillProcess.mockResolvedValue(true);
+        mockReadSettings.mockResolvedValue({});
     });
 
     afterEach(() => {
         vi.useRealTimers();
         vi.unstubAllGlobals();
+        delete process.env.HAPI_API_URL;
+        delete process.env.CLI_API_TOKEN;
     });
 
     it('returns empty sessions when runner is not started', async () => {
@@ -144,8 +160,17 @@ describe('runner control client', () => {
     });
 
     it('prefers mtime comparison when available', async () => {
-        const state = { pid: 55, startedWithCliVersion: 'stale', startedWithCliMtimeMs: 123456 };
+        process.env.CLI_API_TOKEN = 'token-1';
+        const state = {
+            pid: 55,
+            startedWithCliVersion: 'stale',
+            startedWithCliMtimeMs: 123456,
+            startedWithApiUrl: 'http://localhost:3006',
+            startedWithMachineId: 'machine-1',
+            startedWithCliApiTokenHash: hashRunnerCliApiToken('token-1'),
+        };
         mockReadRunnerState.mockResolvedValueOnce(state).mockResolvedValueOnce(state);
+        mockReadSettings.mockResolvedValue({ apiUrl: 'http://localhost:3006', machineId: 'machine-1' });
         mockIsProcessAlive.mockReturnValue(true);
         mockIsBunCompiled.mockReturnValue(false);
         mockProjectPath.mockReturnValue('/tmp/hapi-dev');
@@ -158,8 +183,16 @@ describe('runner control client', () => {
     });
 
     it('uses package version comparison when mtime is unavailable', async () => {
-        const state = { pid: 88, startedWithCliVersion: '0.7.3' };
+        process.env.CLI_API_TOKEN = 'token-1';
+        const state = {
+            pid: 88,
+            startedWithCliVersion: '0.16.3',
+            startedWithApiUrl: 'http://localhost:3006',
+            startedWithMachineId: 'machine-1',
+            startedWithCliApiTokenHash: hashRunnerCliApiToken('token-1'),
+        };
         mockReadRunnerState.mockResolvedValueOnce(state).mockResolvedValueOnce(state);
+        mockReadSettings.mockResolvedValue({ apiUrl: 'http://localhost:3006', machineId: 'machine-1' });
         mockIsProcessAlive.mockReturnValue(true);
         mockIsBunCompiled.mockReturnValue(false);
         mockProjectPath.mockReturnValue('/tmp/hapi-dev');

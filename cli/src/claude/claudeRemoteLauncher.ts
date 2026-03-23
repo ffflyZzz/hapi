@@ -430,10 +430,7 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                     const formattedError = formatLaunchError(e);
                     logger.debug('[remote]: launch error', formattedError.details);
                     if (!this.exitReason) {
-                        session.client.sendSessionEvent({
-                            type: 'message',
-                            message: `Process exited unexpectedly: ${formattedError.summary}`
-                        });
+                        session.client.sendSessionEvent({ type: 'message', message: `Process exited unexpectedly: ${formattedError.summary}` });
                         continue;
                     }
                 } finally {

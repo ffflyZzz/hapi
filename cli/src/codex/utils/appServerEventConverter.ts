@@ -24,17 +24,6 @@ function asNumber(value: unknown): number | null {
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function asText(value: unknown): string | null {
-    if (typeof value === 'string') return value;
-    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-    if (value === null || value === undefined) return null;
-    try {
-        return JSON.stringify(value);
-    } catch {
-        return String(value);
-    }
-}
-
 function extractItemId(params: Record<string, unknown>): string | null {
     const direct = asString(params.itemId ?? params.item_id ?? params.id);
     if (direct) return direct;
@@ -68,6 +57,9 @@ function extractCommand(value: unknown): string | null {
 }
 
 function extractChanges(value: unknown): Record<string, unknown> | null {
+    const record = asRecord(value);
+    if (record) return record;
+
     if (Array.isArray(value)) {
         const changes: Record<string, unknown> = {};
         for (const entry of value) {
@@ -81,98 +73,189 @@ function extractChanges(value: unknown): Record<string, unknown> | null {
         return Object.keys(changes).length > 0 ? changes : null;
     }
 
-    const record = asRecord(value);
-    if (record) return record;
-
     return null;
 }
 
-function extractThreadId(params: Record<string, unknown>, item?: Record<string, unknown> | null): string | null {
-    const thread = asRecord(params.thread);
-    const turn = asRecord(params.turn);
-    const itemThread = item ? asRecord(item.thread) : null;
-    const turnThread = turn ? asRecord(turn.thread) : null;
+function extractTextFromContent(value: unknown): string | null {
+    if (typeof value === 'string' && value.length > 0) {
+        return value;
+    }
 
-    const candidates = [
-        params.threadId,
-        params.thread_id,
-        thread?.id,
-        thread?.threadId,
-        thread?.thread_id,
-        params.sid,
-        turn?.threadId,
-        turn?.thread_id,
-        turnThread?.id,
-        item?.threadId,
-        item?.thread_id,
-        itemThread?.id
-    ];
+    if (!Array.isArray(value)) {
+        return null;
+    }
 
-    for (const candidate of candidates) {
-        const value = asString(candidate);
-        if (value) return value;
+    const chunks: string[] = [];
+    for (const entry of value) {
+        const record = asRecord(entry);
+        if (!record) continue;
+        const text = asString(record.text ?? record.message ?? record.content);
+        if (text) {
+            chunks.push(text);
+        }
+    }
+
+    if (chunks.length === 0) {
+        return null;
+    }
+
+    return chunks.join('');
+}
+
+function extractItemText(item: Record<string, unknown>): string | null {
+    return asString(item.text ?? item.message) ?? extractTextFromContent(item.content);
+}
+
+function extractReasoningText(item: Record<string, unknown>): string | null {
+    const direct = extractItemText(item);
+    if (direct) {
+        return direct;
+    }
+
+    const summary = item.summary_text ?? item.summaryText;
+    if (Array.isArray(summary)) {
+        const chunks = summary.filter((part): part is string => typeof part === 'string' && part.length > 0);
+        if (chunks.length > 0) {
+            return chunks.join('\n');
+        }
     }
 
     return null;
-}
-
-function extractTurnId(params: Record<string, unknown>, item?: Record<string, unknown> | null): string | null {
-    const turn = asRecord(params.turn);
-    const itemTurn = item ? asRecord(item.turn) : null;
-
-    const candidates = [
-        params.turnId,
-        params.turn_id,
-        turn?.id,
-        turn?.turnId,
-        turn?.turn_id,
-        item?.turnId,
-        item?.turn_id,
-        itemTurn?.id
-    ];
-
-    for (const candidate of candidates) {
-        const value = asString(candidate);
-        if (value) return value;
-    }
-
-    return null;
-}
-
-function pickStatus(params: Record<string, unknown>, item?: Record<string, unknown> | null): string | null {
-    return asString(params.status ?? item?.status);
-}
-
-function addStableFields(
-    target: ConvertedEvent,
-    params: Record<string, unknown>,
-    item?: Record<string, unknown> | null,
-    itemId?: string | null
-): ConvertedEvent {
-    const threadId = extractThreadId(params, item);
-    const turnId = extractTurnId(params, item);
-    const status = pickStatus(params, item);
-
-    if (threadId) target.thread_id = threadId;
-    if (turnId) target.turn_id = turnId;
-    if (itemId) target.item_id = itemId;
-    if (status) target.status = status;
-
-    return target;
 }
 
 export class AppServerEventConverter {
     private readonly agentMessageBuffers = new Map<string, string>();
     private readonly reasoningBuffers = new Map<string, string>();
-    private readonly planBuffers = new Map<string, string>();
     private readonly commandOutputBuffers = new Map<string, string>();
-    private readonly fileChangeOutputBuffers = new Map<string, string>();
     private readonly commandMeta = new Map<string, Record<string, unknown>>();
     private readonly fileChangeMeta = new Map<string, Record<string, unknown>>();
+    private readonly completedAgentMessageItems = new Set<string>();
+    private readonly completedReasoningItems = new Set<string>();
+    private readonly reasoningSectionBreakKeys = new Set<string>();
+    private readonly lastAgentMessageDeltaByItemId = new Map<string, string>();
+    private readonly lastReasoningDeltaByItemId = new Map<string, string>();
+    private readonly lastCommandOutputDeltaByItemId = new Map<string, string>();
+
+    private handleWrappedCodexEvent(paramsRecord: Record<string, unknown>): ConvertedEvent[] | null {
+        const msg = asRecord(paramsRecord.msg);
+        if (!msg) {
+            return [];
+        }
+
+        const msgType = asString(msg.type);
+        if (!msgType) {
+            return [];
+        }
+
+        if (msgType === 'item_started' || msgType === 'item_completed') {
+            const itemMethod = msgType === 'item_started' ? 'item/started' : 'item/completed';
+            const item = asRecord(msg.item) ?? {};
+            const params: Record<string, unknown> = {
+                item,
+                itemId: asString(msg.item_id ?? msg.itemId ?? item.id),
+                threadId: asString(msg.thread_id ?? msg.threadId),
+                turnId: asString(msg.turn_id ?? msg.turnId)
+            };
+            return this.handleNotification(itemMethod, params);
+        }
+
+        if (
+            msgType === 'task_started' ||
+            msgType === 'task_complete' ||
+            msgType === 'turn_aborted' ||
+            msgType === 'task_failed'
+        ) {
+            const turnId = asString(msg.turn_id ?? msg.turnId);
+            if ((msgType === 'task_complete' || msgType === 'turn_aborted' || msgType === 'task_failed') && !turnId) {
+                logger.debug('[AppServerEventConverter] Ignoring wrapped terminal event without turn_id', { msgType });
+                return [];
+            }
+
+            const event: ConvertedEvent = { type: msgType };
+            if (turnId) {
+                event.turn_id = turnId;
+            }
+            if (msgType === 'task_failed') {
+                const error = asString(msg.error ?? msg.message ?? asRecord(msg.error)?.message);
+                if (error) {
+                    event.error = error;
+                }
+            }
+            return [event];
+        }
+
+        if (msgType === 'agent_message_delta' || msgType === 'agent_message_content_delta') {
+            const itemId = asString(msg.item_id ?? msg.itemId ?? msg.id) ?? 'agent-message';
+            const delta = asString(msg.delta ?? msg.text ?? msg.message);
+            if (!delta) return [];
+            return this.handleNotification('item/agentMessage/delta', { itemId, delta });
+        }
+
+        if (msgType === 'reasoning_content_delta') {
+            const itemId = asString(msg.item_id ?? msg.itemId ?? msg.id) ?? 'reasoning';
+            const delta = asString(msg.delta ?? msg.text ?? msg.message);
+            if (!delta) return [];
+            return this.handleNotification('item/reasoning/summaryTextDelta', { itemId, delta });
+        }
+
+        if (msgType === 'agent_reasoning_section_break') {
+            const itemId = asString(msg.item_id ?? msg.itemId ?? msg.id) ?? 'reasoning';
+            const summaryIndex = asNumber(msg.summary_index ?? msg.summaryIndex);
+            return this.handleNotification('item/reasoning/summaryPartAdded', {
+                itemId,
+                ...(summaryIndex !== null ? { summaryIndex } : {})
+            });
+        }
+
+        if (msgType === 'agent_reasoning_delta' || msgType === 'agent_reasoning' || msgType === 'agent_message') {
+            return [];
+        }
+
+        if (msgType === 'exec_command_output_delta') {
+            const itemId = asString(msg.call_id ?? msg.callId ?? msg.item_id ?? msg.itemId ?? msg.id);
+            const delta = asString(msg.delta ?? msg.output ?? msg.stdout ?? msg.text);
+            if (!itemId || !delta) return [];
+            return this.handleNotification('item/commandExecution/outputDelta', { itemId, delta });
+        }
+
+        if (msgType === 'error') {
+            const errorRecord = asRecord(msg.error);
+            const willRetry = asBoolean(msg.will_retry ?? msg.willRetry ?? errorRecord?.will_retry ?? errorRecord?.willRetry) ?? false;
+            if (willRetry) {
+                return [];
+            }
+            const error = asString(msg.message ?? msg.reason ?? errorRecord?.message);
+            return error ? [{ type: 'task_failed', error }] : [];
+        }
+
+        if (
+            msgType === 'mcp_startup_update' ||
+            msgType === 'mcp_startup_complete' ||
+            msgType === 'plan_update' ||
+            msgType === 'skills_update_available' ||
+            msgType === 'stream_error' ||
+            msgType === 'warning' ||
+            msgType === 'context_compacted' ||
+            msgType === 'terminal_interaction' ||
+            msgType === 'user_message'
+        ) {
+            return [];
+        }
+
+        return [msg as ConvertedEvent];
+    }
 
     handleNotification(method: string, params: unknown): ConvertedEvent[] {
         const events: ConvertedEvent[] = [];
         const paramsRecord = asRecord(params) ?? {};
+
+        if (method.startsWith('codex/event/')) {
+            return this.handleWrappedCodexEvent(paramsRecord) ?? events;
+        }
+
+        if (method === 'account/rateLimits/updated' || method === 'turn/plan/updated' || method === 'thread/compacted') {
+            return events;
+        }
 
         if (method === 'thread/started' || method === 'thread/resumed') {
             const thread = asRecord(paramsRecord.thread) ?? paramsRecord;
@@ -186,7 +269,7 @@ export class AppServerEventConverter {
         if (method === 'turn/started') {
             const turn = asRecord(paramsRecord.turn) ?? paramsRecord;
             const turnId = asString(turn.turnId ?? turn.turn_id ?? turn.id);
-            events.push(addStableFields({ type: 'task_started', ...(turnId ? { turn_id: turnId } : {}) }, paramsRecord));
+            events.push({ type: 'task_started', ...(turnId ? { turn_id: turnId } : {}) });
             return events;
         }
 
@@ -198,83 +281,40 @@ export class AppServerEventConverter {
             const errorMessage = asString(paramsRecord.error ?? paramsRecord.message ?? paramsRecord.reason);
 
             if (status === 'interrupted' || status === 'cancelled' || status === 'canceled') {
-                events.push(addStableFields({ type: 'turn_aborted', ...(turnId ? { turn_id: turnId } : {}) }, paramsRecord));
+                events.push({ type: 'turn_aborted', ...(turnId ? { turn_id: turnId } : {}) });
                 return events;
             }
 
             if (status === 'failed' || status === 'error') {
-                events.push(addStableFields({
-                    type: 'task_failed',
-                    ...(turnId ? { turn_id: turnId } : {}),
-                    ...(errorMessage ? { error: errorMessage } : {})
-                }, paramsRecord));
+                events.push({ type: 'task_failed', ...(turnId ? { turn_id: turnId } : {}), ...(errorMessage ? { error: errorMessage } : {}) });
                 return events;
             }
 
-            events.push(addStableFields({ type: 'task_complete', ...(turnId ? { turn_id: turnId } : {}) }, paramsRecord));
+            events.push({ type: 'task_complete', ...(turnId ? { turn_id: turnId } : {}) });
             return events;
         }
 
         if (method === 'turn/diff/updated') {
             const diff = asString(paramsRecord.diff ?? paramsRecord.unified_diff ?? paramsRecord.unifiedDiff);
             if (diff) {
-                events.push(addStableFields({ type: 'turn_diff', unified_diff: diff }, paramsRecord));
+                events.push({ type: 'turn_diff', unified_diff: diff });
             }
-            return events;
-        }
-
-        if (method === 'turn/plan/updated') {
-            const explanation = asString(paramsRecord.explanation);
-            const plan = Array.isArray(paramsRecord.plan) ? paramsRecord.plan : null;
-            events.push(addStableFields({
-                type: 'turn_plan_updated',
-                ...(explanation ? { explanation } : {}),
-                ...(plan ? { plan } : {})
-            }, paramsRecord));
             return events;
         }
 
         if (method === 'thread/tokenUsage/updated') {
             const info = asRecord(paramsRecord.tokenUsage ?? paramsRecord.token_usage ?? paramsRecord) ?? {};
-            events.push(addStableFields({ type: 'token_count', info }, paramsRecord));
+            events.push({ type: 'token_count', info });
             return events;
         }
 
         if (method === 'error') {
             const willRetry = asBoolean(paramsRecord.will_retry ?? paramsRecord.willRetry) ?? false;
             if (willRetry) return events;
-
-            const errorRecord = asRecord(paramsRecord.error);
-            const codexErrorInfo = asRecord(
-                paramsRecord.codexErrorInfo
-                ?? paramsRecord.codex_error_info
-                ?? errorRecord?.codexErrorInfo
-                ?? errorRecord?.codex_error_info
-            );
-            const additionalDetails = asRecord(
-                paramsRecord.additionalDetails
-                ?? paramsRecord.additional_details
-                ?? errorRecord?.additionalDetails
-                ?? errorRecord?.additional_details
-            );
-            const httpStatusCode = asNumber(
-                codexErrorInfo?.httpStatusCode
-                ?? codexErrorInfo?.http_status_code
-                ?? paramsRecord.httpStatusCode
-                ?? paramsRecord.http_status_code
-            );
-            const message = asString(paramsRecord.message)
-                ?? asString(errorRecord?.message)
-                ?? asString(paramsRecord.reason)
-                ?? 'Unknown app-server error';
-
-            events.push(addStableFields({
-                type: 'task_failed',
-                error: message,
-                ...(codexErrorInfo ? { codex_error_info: codexErrorInfo } : {}),
-                ...(additionalDetails ? { additional_details: additionalDetails } : {}),
-                ...(httpStatusCode !== null ? { http_status_code: httpStatusCode } : {})
-            }, paramsRecord));
+            const message = asString(paramsRecord.message) ?? asString(asRecord(paramsRecord.error)?.message);
+            if (message) {
+                events.push({ type: 'task_failed', error: message });
+            }
             return events;
         }
 
@@ -282,74 +322,58 @@ export class AppServerEventConverter {
             const itemId = extractItemId(paramsRecord);
             const delta = asString(paramsRecord.delta ?? paramsRecord.text ?? paramsRecord.message);
             if (itemId && delta) {
+                const lastDelta = this.lastAgentMessageDeltaByItemId.get(itemId);
+                if (lastDelta === delta) {
+                    return events;
+                }
+                this.lastAgentMessageDeltaByItemId.set(itemId, delta);
                 const prev = this.agentMessageBuffers.get(itemId) ?? '';
                 this.agentMessageBuffers.set(itemId, prev + delta);
             }
             return events;
         }
 
-        if (method === 'item/plan/delta') {
-            const itemId = extractItemId(paramsRecord);
-            const delta = asString(paramsRecord.delta ?? paramsRecord.text ?? paramsRecord.message);
-            if (itemId && delta) {
-                const prev = this.planBuffers.get(itemId) ?? '';
-                const next = prev + delta;
-                this.planBuffers.set(itemId, next);
-                events.push(addStableFields({
-                    type: 'agent_plan_delta',
-                    item_id: itemId,
-                    delta,
-                    plan_text: next
-                }, paramsRecord, undefined, itemId));
-            }
-            return events;
-        }
-
-        if (method === 'item/reasoning/summaryTextDelta' || method === 'item/reasoning/textDelta') {
+        if (method === 'item/reasoning/textDelta' || method === 'item/reasoning/summaryTextDelta') {
             const itemId = extractItemId(paramsRecord) ?? 'reasoning';
             const delta = asString(paramsRecord.delta ?? paramsRecord.text ?? paramsRecord.message);
             if (delta) {
+                const lastDelta = this.lastReasoningDeltaByItemId.get(itemId);
+                if (lastDelta === delta) {
+                    return events;
+                }
+                this.lastReasoningDeltaByItemId.set(itemId, delta);
                 const prev = this.reasoningBuffers.get(itemId) ?? '';
                 this.reasoningBuffers.set(itemId, prev + delta);
-                events.push(addStableFields({
-                    type: 'agent_reasoning_delta',
-                    delta,
-                    item_id: itemId,
-                    ...(method === 'item/reasoning/summaryTextDelta' ? { reasoning_stream: 'summary' } : { reasoning_stream: 'raw' }),
-                    ...(asNumber(paramsRecord.summaryIndex ?? paramsRecord.summary_index) !== null
-                        ? { summary_index: asNumber(paramsRecord.summaryIndex ?? paramsRecord.summary_index) }
-                        : {})
-                }, paramsRecord, undefined, itemId));
+                events.push({ type: 'agent_reasoning_delta', delta });
             }
             return events;
         }
 
         if (method === 'item/reasoning/summaryPartAdded') {
-            events.push(addStableFields({ type: 'agent_reasoning_section_break' }, paramsRecord));
+            const itemId = extractItemId(paramsRecord) ?? 'reasoning';
+            const summaryIndex = asNumber(paramsRecord.summaryIndex ?? paramsRecord.summary_index);
+            if (summaryIndex !== null) {
+                const key = `${itemId}:${summaryIndex}`;
+                if (this.reasoningSectionBreakKeys.has(key)) {
+                    return events;
+                }
+                this.reasoningSectionBreakKeys.add(key);
+            }
+            events.push({ type: 'agent_reasoning_section_break' });
             return events;
         }
 
         if (method === 'item/commandExecution/outputDelta') {
             const itemId = extractItemId(paramsRecord);
-            const delta = asText(paramsRecord.delta ?? paramsRecord.text ?? paramsRecord.output ?? paramsRecord.stdout);
+            const delta = asString(paramsRecord.delta ?? paramsRecord.text ?? paramsRecord.output ?? paramsRecord.stdout);
             if (itemId && delta) {
+                const lastDelta = this.lastCommandOutputDeltaByItemId.get(itemId);
+                if (lastDelta === delta) {
+                    return events;
+                }
+                this.lastCommandOutputDeltaByItemId.set(itemId, delta);
                 const prev = this.commandOutputBuffers.get(itemId) ?? '';
                 this.commandOutputBuffers.set(itemId, prev + delta);
-            }
-            return events;
-        }
-
-        if (method === 'item/fileChange/outputDelta') {
-            const itemId = extractItemId(paramsRecord);
-            const delta = asText(paramsRecord.delta ?? paramsRecord.text ?? paramsRecord.output ?? paramsRecord.stdout ?? paramsRecord.response);
-            if (itemId && delta) {
-                const prev = this.fileChangeOutputBuffers.get(itemId) ?? '';
-                this.fileChangeOutputBuffers.set(itemId, prev + delta);
-                events.push(addStableFields({
-                    type: 'patch_apply_delta',
-                    item_id: itemId,
-                    delta
-                }, paramsRecord, undefined, itemId));
             }
             return events;
         }
@@ -360,9 +384,6 @@ export class AppServerEventConverter {
 
             const itemType = normalizeItemType(item.type ?? item.itemType ?? item.kind);
             const itemId = extractItemId(paramsRecord) ?? asString(item.id ?? item.itemId ?? item.item_id);
-            const status = asString(item.status);
-            const threadId = extractThreadId(paramsRecord, item);
-            const turnId = extractTurnId(paramsRecord, item);
 
             if (!itemType || !itemId) {
                 return events;
@@ -370,65 +391,33 @@ export class AppServerEventConverter {
 
             if (itemType === 'agentmessage') {
                 if (method === 'item/completed') {
-                    const text = asString(item.text ?? item.message ?? item.content) ?? this.agentMessageBuffers.get(itemId);
-                    if (text) {
-                        const event = addStableFields({
-                            type: 'agent_message',
-                            message: text,
-                            item_id: itemId,
-                            ...(status ? { status } : {})
-                        }, paramsRecord, item, itemId);
-                        events.push(event);
+                    if (this.completedAgentMessageItems.has(itemId)) {
+                        return events;
                     }
-                    this.agentMessageBuffers.delete(itemId);
+                    const text = extractItemText(item) ?? this.agentMessageBuffers.get(itemId);
+                    if (text) {
+                        events.push({ type: 'agent_message', message: text });
+                        this.completedAgentMessageItems.add(itemId);
+                        this.agentMessageBuffers.delete(itemId);
+                    }
+                    this.lastAgentMessageDeltaByItemId.delete(itemId);
                 }
                 return events;
             }
 
             if (itemType === 'reasoning') {
                 if (method === 'item/completed') {
-                    const text = asString(item.text ?? item.message ?? item.content) ?? this.reasoningBuffers.get(itemId);
-                    if (text) {
-                        const event = addStableFields({
-                            type: 'agent_reasoning',
-                            text,
-                            item_id: itemId,
-                            ...(status ? { status } : {})
-                        }, paramsRecord, item, itemId);
-                        events.push(event);
+                    if (this.completedReasoningItems.has(itemId)) {
+                        return events;
                     }
-                    this.reasoningBuffers.delete(itemId);
-                }
-                return events;
-            }
-
-            if (itemType === 'plan') {
-                if (method === 'item/started') {
-                    const text = asString(item.text ?? item.message ?? item.content);
+                    const text = extractReasoningText(item) ?? this.reasoningBuffers.get(itemId);
                     if (text) {
-                        this.planBuffers.set(itemId, text);
+                        events.push({ type: 'agent_reasoning', text });
+                        this.completedReasoningItems.add(itemId);
+                        this.reasoningBuffers.delete(itemId);
                     }
-                    events.push(addStableFields({
-                        type: 'plan_item_started',
-                        call_id: itemId,
-                        item_id: itemId,
-                        ...(text ? { text } : {}),
-                        ...(status ? { status } : {})
-                    }, paramsRecord, item, itemId));
+                    this.lastReasoningDeltaByItemId.delete(itemId);
                 }
-
-                if (method === 'item/completed') {
-                    const text = asString(item.text ?? item.message ?? item.content) ?? this.planBuffers.get(itemId);
-                    events.push(addStableFields({
-                        type: 'plan_item_completed',
-                        call_id: itemId,
-                        item_id: itemId,
-                        ...(text ? { text } : {}),
-                        ...(status ? { status } : {})
-                    }, paramsRecord, item, itemId));
-                    this.planBuffers.delete(itemId);
-                }
-
                 return events;
             }
 
@@ -441,40 +430,37 @@ export class AppServerEventConverter {
                     if (command) meta.command = command;
                     if (cwd) meta.cwd = cwd;
                     if (autoApproved !== null) meta.auto_approved = autoApproved;
-                    if (threadId) meta.thread_id = threadId;
-                    if (turnId) meta.turn_id = turnId;
                     this.commandMeta.set(itemId, meta);
 
-                    events.push(addStableFields({
+                    events.push({
                         type: 'exec_command_begin',
                         call_id: itemId,
-                        item_id: itemId,
-                        ...meta,
-                        ...(status ? { status } : {})
-                    }, paramsRecord, item, itemId));
+                        ...meta
+                    });
                 }
 
                 if (method === 'item/completed') {
                     const meta = this.commandMeta.get(itemId) ?? {};
-                    const output = asText(item.output ?? item.result ?? item.stdout) ?? this.commandOutputBuffers.get(itemId);
-                    const stderr = asText(item.stderr);
-                    const error = asText(item.error);
+                    const output = asString(item.output ?? item.result ?? item.stdout) ?? this.commandOutputBuffers.get(itemId);
+                    const stderr = asString(item.stderr);
+                    const error = asString(item.error);
                     const exitCode = asNumber(item.exitCode ?? item.exit_code ?? item.exitcode);
+                    const status = asString(item.status);
 
-                    events.push(addStableFields({
+                    events.push({
                         type: 'exec_command_end',
                         call_id: itemId,
-                        item_id: itemId,
                         ...meta,
                         ...(output ? { output } : {}),
                         ...(stderr ? { stderr } : {}),
                         ...(error ? { error } : {}),
                         ...(exitCode !== null ? { exit_code: exitCode } : {}),
                         ...(status ? { status } : {})
-                    }, paramsRecord, item, itemId));
+                    });
 
                     this.commandMeta.delete(itemId);
                     this.commandOutputBuffers.delete(itemId);
+                    this.lastCommandOutputDeltaByItemId.delete(itemId);
                 }
 
                 return events;
@@ -487,183 +473,33 @@ export class AppServerEventConverter {
                     const meta: Record<string, unknown> = {};
                     if (changes) meta.changes = changes;
                     if (autoApproved !== null) meta.auto_approved = autoApproved;
-                    if (threadId) meta.thread_id = threadId;
-                    if (turnId) meta.turn_id = turnId;
                     this.fileChangeMeta.set(itemId, meta);
 
-                    events.push(addStableFields({
+                    events.push({
                         type: 'patch_apply_begin',
                         call_id: itemId,
-                        item_id: itemId,
-                        ...meta,
-                        ...(status ? { status } : {})
-                    }, paramsRecord, item, itemId));
+                        ...meta
+                    });
                 }
 
                 if (method === 'item/completed') {
                     const meta = this.fileChangeMeta.get(itemId) ?? {};
-                    const stdout = asText(item.stdout ?? item.output) ?? this.fileChangeOutputBuffers.get(itemId) ?? undefined;
-                    const stderr = asText(item.stderr);
+                    const stdout = asString(item.stdout ?? item.output);
+                    const stderr = asString(item.stderr);
                     const success = asBoolean(item.success ?? item.ok ?? item.applied ?? item.status === 'completed');
 
-                    events.push(addStableFields({
+                    events.push({
                         type: 'patch_apply_end',
                         call_id: itemId,
-                        item_id: itemId,
                         ...meta,
                         ...(stdout ? { stdout } : {}),
                         ...(stderr ? { stderr } : {}),
-                        success: success ?? false,
-                        ...(status ? { status } : {})
-                    }, paramsRecord, item, itemId));
+                        success: success ?? false
+                    });
 
                     this.fileChangeMeta.delete(itemId);
-                    this.fileChangeOutputBuffers.delete(itemId);
                 }
 
-                return events;
-            }
-
-            if (itemType === 'mcptoolcall') {
-                const server = asString(item.server);
-                const tool = asString(item.tool);
-                const name = server && tool ? `mcp__${server}__${tool}` : (tool ?? 'mcp_tool_call');
-                if (method === 'item/started') {
-                    events.push(addStableFields({
-                        type: 'mcp_tool_call_begin',
-                        call_id: itemId,
-                        item_id: itemId,
-                        name,
-                        input: item.arguments ?? item.input ?? null,
-                        ...(status ? { status } : {})
-                    }, paramsRecord, item, itemId));
-                } else {
-                    events.push(addStableFields({
-                        type: 'mcp_tool_call_end',
-                        call_id: itemId,
-                        item_id: itemId,
-                        name,
-                        output: item.result ?? item.output ?? null,
-                        error: item.error ?? null,
-                        ...(status ? { status } : {})
-                    }, paramsRecord, item, itemId));
-                }
-                return events;
-            }
-
-            if (itemType === 'collabtoolcall') {
-                const tool = asString(item.tool) ?? 'collab_tool_call';
-                if (method === 'item/started') {
-                    events.push(addStableFields({
-                        type: 'collab_tool_call_begin',
-                        call_id: itemId,
-                        item_id: itemId,
-                        name: tool,
-                        input: {
-                            sender_thread_id: item.senderThreadId ?? item.sender_thread_id,
-                            receiver_thread_id: item.receiverThreadId ?? item.receiver_thread_id,
-                            new_thread_id: item.newThreadId ?? item.new_thread_id,
-                            prompt: item.prompt,
-                            agent_status: item.agentStatus ?? item.agent_status
-                        },
-                        ...(status ? { status } : {})
-                    }, paramsRecord, item, itemId));
-                } else {
-                    events.push(addStableFields({
-                        type: 'collab_tool_call_end',
-                        call_id: itemId,
-                        item_id: itemId,
-                        name: tool,
-                        output: item.result ?? item.output ?? null,
-                        error: item.error ?? null,
-                        ...(status ? { status } : {})
-                    }, paramsRecord, item, itemId));
-                }
-                return events;
-            }
-
-            if (itemType === 'websearch') {
-                if (method === 'item/started') {
-                    events.push(addStableFields({
-                        type: 'web_search_begin',
-                        call_id: itemId,
-                        item_id: itemId,
-                        name: 'web_search',
-                        input: {
-                            query: item.query,
-                            action: item.action ?? null
-                        },
-                        ...(status ? { status } : {})
-                    }, paramsRecord, item, itemId));
-                } else {
-                    events.push(addStableFields({
-                        type: 'web_search_end',
-                        call_id: itemId,
-                        item_id: itemId,
-                        name: 'web_search',
-                        output: item.result ?? item.output ?? null,
-                        error: item.error ?? null,
-                        ...(status ? { status } : {})
-                    }, paramsRecord, item, itemId));
-                }
-                return events;
-            }
-
-            if (itemType === 'imageview') {
-                if (method === 'item/started') {
-                    events.push(addStableFields({
-                        type: 'image_view_begin',
-                        call_id: itemId,
-                        item_id: itemId,
-                        name: 'image_view',
-                        input: {
-                            path: asString(item.path)
-                        },
-                        ...(status ? { status } : {})
-                    }, paramsRecord, item, itemId));
-                } else {
-                    events.push(addStableFields({
-                        type: 'image_view_end',
-                        call_id: itemId,
-                        item_id: itemId,
-                        name: 'image_view',
-                        output: item.result ?? item.output ?? null,
-                        error: item.error ?? null,
-                        ...(status ? { status } : {})
-                    }, paramsRecord, item, itemId));
-                }
-                return events;
-            }
-
-            if (itemType === 'enteredreviewmode') {
-                events.push(addStableFields({
-                    type: 'review_mode_entered',
-                    call_id: itemId,
-                    item_id: itemId,
-                    review: item.review ?? null,
-                    ...(status ? { status } : {})
-                }, paramsRecord, item, itemId));
-                return events;
-            }
-
-            if (itemType === 'exitedreviewmode') {
-                events.push(addStableFields({
-                    type: 'review_mode_exited',
-                    call_id: itemId,
-                    item_id: itemId,
-                    review: item.review ?? null,
-                    ...(status ? { status } : {})
-                }, paramsRecord, item, itemId));
-                return events;
-            }
-
-            if (itemType === 'contextcompaction') {
-                events.push(addStableFields({
-                    type: method === 'item/started' ? 'context_compaction_started' : 'context_compaction_completed',
-                    call_id: itemId,
-                    item_id: itemId,
-                    ...(status ? { status } : {})
-                }, paramsRecord, item, itemId));
                 return events;
             }
         }
@@ -675,10 +511,14 @@ export class AppServerEventConverter {
     reset(): void {
         this.agentMessageBuffers.clear();
         this.reasoningBuffers.clear();
-        this.planBuffers.clear();
         this.commandOutputBuffers.clear();
-        this.fileChangeOutputBuffers.clear();
         this.commandMeta.clear();
         this.fileChangeMeta.clear();
+        this.completedAgentMessageItems.clear();
+        this.completedReasoningItems.clear();
+        this.reasoningSectionBreakKeys.clear();
+        this.lastAgentMessageDeltaByItemId.clear();
+        this.lastReasoningDeltaByItemId.clear();
+        this.lastCommandOutputDeltaByItemId.clear();
     }
 }

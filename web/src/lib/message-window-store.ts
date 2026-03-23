@@ -1,7 +1,7 @@
 import type { ApiClient } from '@/api/client'
 import type { DecryptedMessage, MessageStatus } from '@/types/api'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
-import { mergeMessages } from '@/lib/messages'
+import { isUserMessage, mergeMessages } from '@/lib/messages'
 
 export type MessageWindowState = {
     sessionId: string
@@ -38,6 +38,48 @@ type PendingVisibilityCacheEntry = {
 const states = new Map<string, InternalState>()
 const listeners = new Map<string, Set<() => void>>()
 const pendingVisibilityCacheBySession = new Map<string, Map<string, PendingVisibilityCacheEntry>>()
+
+// Throttled notification: coalesce rapid state updates into at most one
+// notification per NOTIFY_THROTTLE_MS during streaming. This prevents
+// Windows UI jank caused by excessive React re-renders during SSE streaming.
+const NOTIFY_THROTTLE_MS = 150
+const pendingNotifySessionIds = new Set<string>()
+let notifyRafId: ReturnType<typeof requestAnimationFrame> | null = null
+let lastNotifyAt = 0
+
+function scheduleNotify(sessionId: string): void {
+    pendingNotifySessionIds.add(sessionId)
+    if (notifyRafId !== null) {
+        return
+    }
+    const elapsed = Date.now() - lastNotifyAt
+    if (elapsed >= NOTIFY_THROTTLE_MS) {
+        // Enough time has passed — flush on next animation frame
+        notifyRafId = requestAnimationFrame(flushNotifications)
+    } else {
+        // Too soon — delay until the throttle window expires, then use rAF
+        const remaining = NOTIFY_THROTTLE_MS - elapsed
+        setTimeout(() => {
+            notifyRafId = requestAnimationFrame(flushNotifications)
+        }, remaining)
+        // Use a sentinel so we don't double-schedule
+        notifyRafId = -1 as unknown as ReturnType<typeof requestAnimationFrame>
+    }
+}
+
+function flushNotifications(): void {
+    notifyRafId = null
+    lastNotifyAt = Date.now()
+    const sessionIds = Array.from(pendingNotifySessionIds)
+    pendingNotifySessionIds.clear()
+    for (const sessionId of sessionIds) {
+        const subs = listeners.get(sessionId)
+        if (!subs) continue
+        for (const listener of subs) {
+            listener()
+        }
+    }
+}
 
 function getPendingVisibilityCache(sessionId: string): Map<string, PendingVisibilityCacheEntry> {
     const existing = pendingVisibilityCacheBySession.get(sessionId)
@@ -118,6 +160,11 @@ function getState(sessionId: string): InternalState {
 }
 
 function notify(sessionId: string): void {
+    scheduleNotify(sessionId)
+}
+
+function notifyImmediate(sessionId: string): void {
+    // Bypass throttle for user-initiated actions (flush, clear, etc.)
     const subs = listeners.get(sessionId)
     if (!subs) return
     for (const listener of subs) {
@@ -125,16 +172,20 @@ function notify(sessionId: string): void {
     }
 }
 
-function setState(sessionId: string, next: InternalState): void {
+function setState(sessionId: string, next: InternalState, immediate?: boolean): void {
     states.set(sessionId, next)
-    notify(sessionId)
+    if (immediate) {
+        notifyImmediate(sessionId)
+    } else {
+        notify(sessionId)
+    }
 }
 
-function updateState(sessionId: string, updater: (prev: InternalState) => InternalState): void {
+function updateState(sessionId: string, updater: (prev: InternalState) => InternalState, immediate?: boolean): void {
     const prev = getState(sessionId)
     const next = updater(prev)
     if (next !== prev) {
-        setState(sessionId, next)
+        setState(sessionId, next, immediate)
     }
 }
 
@@ -379,7 +430,7 @@ export function clearMessageWindow(sessionId: string): void {
     if (!states.has(sessionId)) {
         return
     }
-    setState(sessionId, createState(sessionId))
+    setState(sessionId, createState(sessionId), true)
 }
 
 export function seedMessageWindowFromSession(fromSessionId: string, toSessionId: string): void {
@@ -480,14 +531,29 @@ export function ingestIncomingMessages(sessionId: string, incoming: DecryptedMes
             const pending = filterPendingAgainstVisible(prev.pending, trimmed)
             return buildState(prev, { messages: trimmed, pending })
         }
-        const pendingResult = mergeIntoPending(prev, incoming)
-        return buildState(prev, {
-            pending: pendingResult.pending,
-            pendingVisibleCount: pendingResult.pendingVisibleCount,
-            pendingOverflowCount: pendingResult.pendingOverflowCount,
-            pendingOverflowVisibleCount: pendingResult.pendingOverflowVisibleCount,
-            warning: pendingResult.warning,
-        })
+        // 不在底部时：agent 消息立即显示，user 消息才放入 pending
+        // 原因：用户必须看到 AI 回复才能继续交互，pending 机制会导致回复滞后
+        const agentMessages = incoming.filter(msg => !isUserMessage(msg))
+        const userMessages = incoming.filter(msg => isUserMessage(msg))
+
+        let state = prev
+        if (agentMessages.length > 0) {
+            const merged = mergeMessages(state.messages, agentMessages)
+            const trimmed = trimVisible(merged, 'append')
+            const pending = filterPendingAgainstVisible(state.pending, trimmed)
+            state = buildState(state, { messages: trimmed, pending })
+        }
+        if (userMessages.length > 0) {
+            const pendingResult = mergeIntoPending(state, userMessages)
+            state = buildState(state, {
+                pending: pendingResult.pending,
+                pendingVisibleCount: pendingResult.pendingVisibleCount,
+                pendingOverflowCount: pendingResult.pendingOverflowCount,
+                pendingOverflowVisibleCount: pendingResult.pendingOverflowVisibleCount,
+                warning: pendingResult.warning,
+            })
+        }
+        return state
     })
 }
 
@@ -508,7 +574,7 @@ export function flushPendingMessages(sessionId: string): boolean {
             pendingOverflowVisibleCount: 0,
             warning: needsRefresh ? (prev.warning ?? PENDING_OVERFLOW_WARNING) : prev.warning,
         })
-    })
+    }, true)
     return needsRefresh
 }
 
@@ -518,7 +584,7 @@ export function setAtBottom(sessionId: string, atBottom: boolean): void {
             return prev
         }
         return buildState(prev, { atBottom })
-    })
+    }, true)
 }
 
 export function appendOptimisticMessage(sessionId: string, message: DecryptedMessage): void {
@@ -527,7 +593,7 @@ export function appendOptimisticMessage(sessionId: string, message: DecryptedMes
         const trimmed = trimVisible(merged, 'append')
         const pending = filterPendingAgainstVisible(prev.pending, trimmed)
         return buildState(prev, { messages: trimmed, pending, atBottom: true })
-    })
+    }, true)
 }
 
 export function updateMessageStatus(sessionId: string, localId: string, status: MessageStatus): void {

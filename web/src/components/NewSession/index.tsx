@@ -1,18 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { ApiClient } from '@/api/client'
 import type { Machine } from '@/types/api'
 import { usePlatform } from '@/hooks/usePlatform'
+import { useMachinePathsExists } from '@/hooks/useMachinePathsExists'
 import { useSpawnSession } from '@/hooks/mutations/useSpawnSession'
 import { useSessions } from '@/hooks/queries/useSessions'
 import { useActiveSuggestions, type Suggestion } from '@/hooks/useActiveSuggestions'
 import { useDirectorySuggestions } from '@/hooks/useDirectorySuggestions'
 import { useRecentPaths } from '@/hooks/useRecentPaths'
-import type { AgentType, SessionType } from './types'
+import { useTranslation } from '@/lib/use-translation'
+import type { AgentType, CodexReasoningEffort, SessionType } from './types'
 import { ActionButtons } from './ActionButtons'
 import { AgentSelector } from './AgentSelector'
 import { DirectorySection } from './DirectorySection'
 import { MachineSelector } from './MachineSelector'
 import { ModelSelector } from './ModelSelector'
+import { ReasoningEffortSelector } from './ReasoningEffortSelector'
 import {
     loadPreferredAgent,
     loadPreferredYoloMode,
@@ -21,6 +24,7 @@ import {
 } from './preferences'
 import { SessionTypeSelector } from './SessionTypeSelector'
 import { YoloToggle } from './YoloToggle'
+import { formatRunnerSpawnError } from '../../utils/formatRunnerSpawnError'
 
 export function NewSession(props: {
     api: ApiClient
@@ -30,6 +34,7 @@ export function NewSession(props: {
     onCancel: () => void
 }) {
     const { haptic } = usePlatform()
+    const { t } = useTranslation()
     const { spawnSession, isPending, error: spawnError } = useSpawnSession(props.api)
     const { sessions } = useSessions(props.api)
     const isFormDisabled = Boolean(isPending || props.isLoading)
@@ -39,12 +44,13 @@ export function NewSession(props: {
     const [directory, setDirectory] = useState('')
     const [suppressSuggestions, setSuppressSuggestions] = useState(false)
     const [isDirectoryFocused, setIsDirectoryFocused] = useState(false)
-    const [pathExistence, setPathExistence] = useState<Record<string, boolean>>({})
     const [agent, setAgent] = useState<AgentType>(loadPreferredAgent)
     const [model, setModel] = useState('auto')
+    const [modelReasoningEffort, setModelReasoningEffort] = useState<CodexReasoningEffort>('default')
     const [yoloMode, setYoloMode] = useState(loadPreferredYoloMode)
     const [sessionType, setSessionType] = useState<SessionType>('simple')
     const [worktreeName, setWorktreeName] = useState('')
+    const [directoryCreationConfirmed, setDirectoryCreationConfirmed] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const worktreeInputRef = useRef<HTMLInputElement>(null)
 
@@ -82,45 +88,59 @@ export function NewSession(props: {
         }
     }, [props.machines, machineId, getLastUsedMachineId, getRecentPaths])
 
+    const selectedMachine = useMemo(
+        () => (machineId ? props.machines.find((machine) => machine.id === machineId) ?? null : null),
+        [machineId, props.machines]
+    )
+    const runnerSpawnError = useMemo(
+        () => formatRunnerSpawnError(selectedMachine),
+        [selectedMachine]
+    )
+
     const recentPaths = useMemo(
         () => getRecentPaths(machineId),
         [getRecentPaths, machineId]
     )
 
+    const trimmedDirectory = directory.trim()
+    const deferredDirectory = useDeferredValue(trimmedDirectory)
     const allPaths = useDirectorySuggestions(machineId, sessions, recentPaths)
 
     const pathsToCheck = useMemo(
-        () => Array.from(new Set(allPaths)).slice(0, 1000),
-        [allPaths]
+        () => Array.from(new Set([
+            ...(deferredDirectory ? [deferredDirectory] : []),
+            ...allPaths
+        ])).slice(0, 1000),
+        [allPaths, deferredDirectory]
     )
 
-    useEffect(() => {
-        let cancelled = false
-
-        if (!machineId || pathsToCheck.length === 0) {
-            setPathExistence({})
-            return () => { cancelled = true }
-        }
-
-        void props.api.checkMachinePathsExists(machineId, pathsToCheck)
-            .then((result) => {
-                if (cancelled) return
-                setPathExistence(result.exists ?? {})
-            })
-            .catch(() => {
-                if (cancelled) return
-                setPathExistence({})
-            })
-
-        return () => {
-            cancelled = true
-        }
-    }, [machineId, pathsToCheck, props.api])
+    const { pathExistence, checkPathsExists } = useMachinePathsExists(props.api, machineId, pathsToCheck)
 
     const verifiedPaths = useMemo(
         () => allPaths.filter((path) => pathExistence[path]),
         [allPaths, pathExistence]
     )
+
+    const currentDirectoryExists = trimmedDirectory ? pathExistence[trimmedDirectory] : undefined
+    const needsDirectoryCreationWarning = sessionType === 'simple' && trimmedDirectory !== '' && currentDirectoryExists === false
+    const missingWorktreeDirectory = sessionType === 'worktree' && trimmedDirectory !== '' && currentDirectoryExists === false
+    const directoryStatusMessage = missingWorktreeDirectory
+        ? t('session.directoryMissingWorktree')
+        : needsDirectoryCreationWarning
+            ? (
+                directoryCreationConfirmed
+                    ? t('session.directoryMissingSimpleConfirm')
+                    : t('session.directoryMissingSimple')
+            )
+            : null
+    const directoryStatusTone = missingWorktreeDirectory ? 'error' : needsDirectoryCreationWarning ? 'warning' : null
+    const createLabel = needsDirectoryCreationWarning && directoryCreationConfirmed
+        ? t('session.createAndCreateDirectory')
+        : undefined
+
+    useEffect(() => {
+        setDirectoryCreationConfirmed(false)
+    }, [machineId, sessionType, trimmedDirectory])
 
     const getSuggestions = useCallback(async (query: string): Promise<Suggestion[]> => {
         const lowered = query.toLowerCase()
@@ -205,16 +225,34 @@ export function NewSession(props: {
     }, [suggestions, selectedIndex, moveUp, moveDown, clearSuggestions, handleSuggestionSelect])
 
     async function handleCreate() {
-        if (!machineId || !directory.trim()) return
+        if (!machineId || !trimmedDirectory) return
 
         setError(null)
         try {
+            const existsResult = await checkPathsExists([trimmedDirectory])
+            const directoryExists = existsResult[trimmedDirectory]
+
+            if (sessionType === 'worktree' && directoryExists === false) {
+                haptic.notification('error')
+                setError(t('session.directoryMissingWorktree'))
+                return
+            }
+
+            if (sessionType === 'simple' && directoryExists === false && !directoryCreationConfirmed) {
+                setDirectoryCreationConfirmed(true)
+                return
+            }
+
             const resolvedModel = model !== 'auto' && agent !== 'opencode' ? model : undefined
+            const resolvedModelReasoningEffort = agent === 'codex' && modelReasoningEffort !== 'default'
+                ? modelReasoningEffort
+                : undefined
             const result = await spawnSession({
                 machineId,
-                directory: directory.trim(),
+                directory: trimmedDirectory,
                 agent,
                 model: resolvedModel,
+                modelReasoningEffort: resolvedModelReasoningEffort,
                 yolo: yoloMode,
                 sessionType,
                 worktreeName: sessionType === 'worktree' ? (worktreeName.trim() || undefined) : undefined
@@ -223,7 +261,7 @@ export function NewSession(props: {
             if (result.type === 'success') {
                 haptic.notification('success')
                 setLastUsedMachineId(machineId)
-                addRecentPath(machineId, directory.trim())
+                addRecentPath(machineId, trimmedDirectory)
                 props.onSuccess(result.sessionId)
                 return
             }
@@ -236,7 +274,7 @@ export function NewSession(props: {
         }
     }
 
-    const canCreate = Boolean(machineId && directory.trim() && !isFormDisabled)
+    const canCreate = Boolean(machineId && trimmedDirectory && !isFormDisabled && !missingWorktreeDirectory)
 
     return (
         <div className="flex flex-col divide-y divide-[var(--app-divider)]">
@@ -247,12 +285,19 @@ export function NewSession(props: {
                 isDisabled={isFormDisabled}
                 onChange={handleMachineChange}
             />
+            {runnerSpawnError ? (
+                <div className="px-3 py-2 text-xs text-red-600">
+                    Runner last spawn error: {runnerSpawnError}
+                </div>
+            ) : null}
             <DirectorySection
                 directory={directory}
                 suggestions={suggestions}
                 selectedIndex={selectedIndex}
                 isDisabled={isFormDisabled}
                 recentPaths={recentPaths}
+                statusMessage={directoryStatusMessage}
+                statusTone={directoryStatusTone}
                 onDirectoryChange={handleDirectoryChange}
                 onDirectoryFocus={handleDirectoryFocus}
                 onDirectoryBlur={handleDirectoryBlur}
@@ -279,6 +324,12 @@ export function NewSession(props: {
                 isDisabled={isFormDisabled}
                 onModelChange={setModel}
             />
+            <ReasoningEffortSelector
+                agent={agent}
+                value={modelReasoningEffort}
+                isDisabled={isFormDisabled}
+                onChange={setModelReasoningEffort}
+            />
             <YoloToggle
                 yoloMode={yoloMode}
                 isDisabled={isFormDisabled}
@@ -295,6 +346,7 @@ export function NewSession(props: {
                 isPending={isPending}
                 canCreate={canCreate}
                 isDisabled={isFormDisabled}
+                createLabel={createLabel}
                 onCancel={props.onCancel}
                 onCreate={handleCreate}
             />

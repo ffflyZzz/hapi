@@ -29,12 +29,16 @@ describe('CodexAppServerClient wrappers', () => {
         sendRequest.mockResolvedValue({ userAgent: 'hapi' });
 
         const response = await client.initialize({
-            clientInfo: { name: 'hapi-codex-client', version: '1.0.0' }
+            clientInfo: { name: 'hapi-codex-client', version: '1.0.0' },
+            capabilities: { experimentalApi: true }
         });
 
         expect(sendRequest).toHaveBeenCalledWith(
             'initialize',
-            { clientInfo: { name: 'hapi-codex-client', version: '1.0.0' } },
+            {
+                clientInfo: { name: 'hapi-codex-client', version: '1.0.0' },
+                capabilities: { experimentalApi: true }
+            },
             { timeoutMs: 30_000 }
         );
         expect(sendNotification).toHaveBeenCalledWith('initialized');

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { AssistantRuntimeProvider } from '@assistant-ui/react'
 import type { ApiClient } from '@/api/client'
-import type { AttachmentMetadata, DecryptedMessage, ModelMode, PermissionMode, Session } from '@/types/api'
+import type { AttachmentMetadata, CodexCollaborationMode, DecryptedMessage, PermissionMode, Session } from '@/types/api'
 import type { ChatBlock, NormalizedMessage } from '@/chat/types'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
@@ -13,10 +13,12 @@ import { HappyThread } from '@/components/AssistantChat/HappyThread'
 import { useHappyRuntime } from '@/lib/assistant-runtime'
 import { createAttachmentAdapter } from '@/lib/attachmentAdapter'
 import { SessionHeader } from '@/components/SessionHeader'
+import { TeamPanel } from '@/components/TeamPanel'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { useVoiceOptional } from '@/lib/voice-context'
 import { RealtimeVoiceSession, registerSessionStore, registerVoiceHooksStore, voiceHooks } from '@/realtime'
+import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
 
 export function SessionChat(props: {
     api: ApiClient
@@ -41,14 +43,18 @@ export function SessionChat(props: {
     const { haptic } = usePlatform()
     const navigate = useNavigate()
     const sessionInactive = !props.session.active
+    const terminalSupported = isRemoteTerminalSupported(props.session.metadata)
     const normalizedCacheRef = useRef<Map<string, { source: DecryptedMessage; normalized: NormalizedMessage | null }>>(new Map())
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const [forceScrollToken, setForceScrollToken] = useState(0)
     const agentFlavor = props.session.metadata?.flavor ?? null
-    const { abortSession, switchSession, setPermissionMode, setModelMode } = useSessionActions(
+    const controlledByUser = props.session.agentState?.controlledByUser === true
+    const codexCollaborationModeSupported = agentFlavor === 'codex' && !controlledByUser
+    const { abortSession, switchSession, setPermissionMode, setCollaborationMode, setModel } = useSessionActions(
         props.api,
         props.session.id,
-        agentFlavor
+        agentFlavor,
+        codexCollaborationModeSupported
     )
 
     // Voice assistant integration
@@ -204,17 +210,28 @@ export function SessionChat(props: {
         }
     }, [setPermissionMode, props.onRefresh, haptic])
 
-    // Model mode change handler
-    const handleModelModeChange = useCallback(async (mode: ModelMode) => {
+    const handleCollaborationModeChange = useCallback(async (mode: CodexCollaborationMode) => {
         try {
-            await setModelMode(mode)
+            await setCollaborationMode(mode)
             haptic.notification('success')
             props.onRefresh()
         } catch (e) {
             haptic.notification('error')
-            console.error('Failed to set model mode:', e)
+            console.error('Failed to set collaboration mode:', e)
         }
-    }, [setModelMode, props.onRefresh, haptic])
+    }, [setCollaborationMode, props.onRefresh, haptic])
+
+    // Model mode change handler
+    const handleModelChange = useCallback(async (model: string | null) => {
+        try {
+            await setModel(model)
+            haptic.notification('success')
+            props.onRefresh()
+        } catch (e) {
+            haptic.notification('error')
+            console.error('Failed to set model:', e)
+        }
+    }, [setModel, props.onRefresh, haptic])
 
     // Abort handler
     const handleAbort = useCallback(async () => {
@@ -274,6 +291,10 @@ export function SessionChat(props: {
                 onSessionDeleted={props.onBack}
             />
 
+            {props.session.teamState && (
+                <TeamPanel teamState={props.session.teamState} />
+            )}
+
             {sessionInactive ? (
                 <div className="px-3 pt-3">
                     <div className="mx-auto w-full max-w-content rounded-md bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
@@ -309,18 +330,25 @@ export function SessionChat(props: {
                     <HappyComposer
                         disabled={props.isSending}
                         permissionMode={props.session.permissionMode}
-                        modelMode={props.session.modelMode}
+                        collaborationMode={codexCollaborationModeSupported ? props.session.collaborationMode : undefined}
+                        model={props.session.model}
                         agentFlavor={agentFlavor}
                         active={props.session.active}
                         allowSendWhenInactive
                         thinking={props.session.thinking}
                         agentState={props.session.agentState}
                         contextSize={reduced.latestUsage?.contextSize}
-                        controlledByUser={props.session.agentState?.controlledByUser === true}
+                        controlledByUser={controlledByUser}
+                        onCollaborationModeChange={
+                            codexCollaborationModeSupported && props.session.active && !controlledByUser
+                                ? handleCollaborationModeChange
+                                : undefined
+                        }
                         onPermissionModeChange={handlePermissionModeChange}
-                        onModelModeChange={handleModelModeChange}
+                        onModelChange={handleModelChange}
                         onSwitchToRemote={handleSwitchToRemote}
-                        onTerminal={props.session.active ? handleViewTerminal : undefined}
+                        onTerminal={props.session.active && terminalSupported ? handleViewTerminal : undefined}
+                        terminalUnsupported={props.session.active && !terminalSupported}
                         autocompleteSuggestions={props.autocompleteSuggestions}
                         voiceStatus={voice?.status}
                         voiceMicMuted={voice?.micMuted}

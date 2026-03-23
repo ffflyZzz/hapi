@@ -7,14 +7,17 @@
 ::: code-group
 
 ```bash [npm]
-npm install -g @aiflyzx/hapi
+npm install -g @aiflyzx/hapi --registry=https://registry.npmjs.org
 ```
+
 
 ```bash [npx (one-off)]
 npx @aiflyzx/hapi
 ```
 
 :::
+
+> Recommendation: use the official npm registry for global install. Some mirrors may not sync platform packages in time.
 
 Other install options: [Installation](./installation.md)
 

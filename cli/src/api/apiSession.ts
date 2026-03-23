@@ -9,6 +9,7 @@ import { apiValidationError } from '@/utils/errorUtils'
 import { AsyncLock } from '@/utils/lock'
 import type { RawJSONLines } from '@/claude/types'
 import { configuration } from '@/configuration'
+import { AGENT_MESSAGE_PAYLOAD_TYPE } from "@hapi/protocol"
 import type { ClientToServerEvents, ServerToClientEvents, Update } from '@hapi/protocol'
 import {
     TerminalClosePayloadSchema,
@@ -21,8 +22,9 @@ import type {
     MessageContent,
     MessageMeta,
     Metadata,
+    SessionCollaborationMode,
     Session,
-    SessionModelMode,
+    SessionModel,
     SessionPermissionMode,
     UserMessage
 } from './types'
@@ -391,11 +393,11 @@ export class ApiSessionClient extends EventEmitter {
         })
     }
 
-    sendCodexMessage(body: unknown): void {
+    sendAgentMessage(body: unknown): void {
         const content = {
             role: 'agent',
             content: {
-                type: 'codex',
+                type: AGENT_MESSAGE_PAYLOAD_TYPE,
                 data: body
             },
             meta: {
@@ -438,7 +440,11 @@ export class ApiSessionClient extends EventEmitter {
     keepAlive(
         thinking: boolean,
         mode: 'local' | 'remote',
-        runtime?: { permissionMode?: SessionPermissionMode; modelMode?: SessionModelMode }
+        runtime?: {
+            permissionMode?: SessionPermissionMode
+            model?: SessionModel
+            collaborationMode?: SessionCollaborationMode
+        }
     ): void {
         this.socket.volatile.emit('session-alive', {
             sid: this.sessionId,

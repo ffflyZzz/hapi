@@ -14,6 +14,7 @@ import { resolveGeminiRuntimeConfig } from './utils/config';
 import { isPermissionModeAllowedForFlavor } from '@hapi/protocol';
 import { PermissionModeSchema } from '@hapi/protocol/schemas';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
+import { getInvokedCwd } from '@/utils/invokedCwd';
 
 export async function runGemini(opts: {
     startedBy?: 'runner' | 'terminal';
@@ -21,7 +22,7 @@ export async function runGemini(opts: {
     permissionMode?: PermissionMode;
     model?: string;
 } = {}): Promise<void> {
-    const workingDirectory = process.cwd();
+    const workingDirectory = getInvokedCwd();
     const startedBy = opts.startedBy ?? 'terminal';
 
     logger.debug(`[gemini] Starting with options: startedBy=${startedBy}, startingMode=${opts.startingMode}`);
@@ -35,11 +36,17 @@ export async function runGemini(opts: {
         controlledByUser: false
     };
 
+    const runtimeConfig = resolveGeminiRuntimeConfig({ model: opts.model });
+    const persistedModel = runtimeConfig.modelSource === 'default'
+        ? undefined
+        : runtimeConfig.model;
+
     const { api, session } = await bootstrapSession({
         flavor: 'gemini',
         startedBy,
         workingDirectory,
-        agentState: initialState
+        agentState: initialState,
+        model: persistedModel
     });
 
     const startingMode: 'local' | 'remote' = opts.startingMode
@@ -54,7 +61,7 @@ export async function runGemini(opts: {
 
     const sessionWrapperRef: { current: GeminiSession | null } = { current: null };
     let currentPermissionMode: PermissionMode = opts.permissionMode ?? 'default';
-    const resolvedModel = resolveGeminiRuntimeConfig({ model: opts.model }).model;
+    const resolvedModel = runtimeConfig.model;
 
     const hookServer = await startHookServer({
         onSessionHook: (sessionId, data) => {

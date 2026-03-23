@@ -9,8 +9,11 @@ export type StoredSession = {
     metadataVersion: number
     agentState: unknown | null
     agentStateVersion: number
+    model: string | null
     todos: unknown | null
     todosUpdatedAt: number | null
+    teamState: unknown | null
+    teamStateUpdatedAt: number | null
     active: boolean
     activeAt: number | null
     seq: number

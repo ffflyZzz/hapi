@@ -1,6 +1,6 @@
 {
   "name": "@aiflyzx/hapi",
-  "version": "0.7.4",
+  "version": "0.16.3",
   "description": "App for agentic coding - access coding agent anywhere",
   "author": "Kirill Dubovitskiy & weishu",
   "license": "AGPL-3.0-only",
@@ -26,11 +26,11 @@
     }
   },
   "optionalDependencies": {
-    "@aiflyzx/hapi-darwin-arm64": "0.7.4",
-    "@aiflyzx/hapi-darwin-x64": "0.7.4",
-    "@aiflyzx/hapi-linux-arm64": "0.7.4",
-    "@aiflyzx/hapi-linux-x64": "0.7.4",
-    "@aiflyzx/hapi-win32-x64": "0.7.4"
+    "@aiflyzx/hapi-darwin-arm64": "0.16.3",
+    "@aiflyzx/hapi-darwin-x64": "0.16.3",
+    "@aiflyzx/hapi-linux-arm64": "0.16.3",
+    "@aiflyzx/hapi-linux-x64": "0.16.3",
+    "@aiflyzx/hapi-win32-x64": "0.16.3"
   },
   "scripts": {
     "postinstall": "node -e \"try{require('fs').chmodSync(require('path').join(__dirname,'bin','hapi.cjs'),0o755)}catch(e){}\"",
@@ -43,12 +43,12 @@
     "prepack": "bun run prepare-npm-packages",
     "tools:unpack": "bun run scripts/unpack-tools.ts",
     "test": "bun run tools:unpack && vitest run",
-    "coverage": "bun run tools:unpack && vitest run --coverage",
     "test:win": "vitest run",
     "dev": "bun src/index.ts",
     "dev:local-server": "bun --env-file .env.dev-local-server src/index.ts",
     "dev:integration-test-env": "bun --env-file .env.integration-test src/index.ts",
-    "release-all": "bun run scripts/release-all.ts"
+    "release-all": "bun run scripts/release-all.ts",
+    "coverage": "bun run tools:unpack && vitest run --coverage"
   },
   "dependencies": {
     "@hapi/protocol": "workspace:*",
@@ -71,11 +71,11 @@
   },
   "devDependencies": {
     "@types/node": ">=25",
-    "@vitest/coverage-v8": "4.0.16",
     "bun-types": "^1.3.5",
     "dotenv": "^17.2.3",
     "typescript": "^5",
-    "vitest": "^4.0.16"
+    "vitest": "^4.0.16",
+    "@vitest/coverage-v8": "4.0.16"
   },
   "resolutions": {
     "whatwg-url": "14.2.0",

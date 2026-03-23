@@ -4,7 +4,7 @@ Install the HAPI CLI and set up the hub.
 
 ## Prerequisites
 
-- Claude Code, OpenAI Codex CLI, Google Gemini CLI, or OpenCode CLI installed
+- Claude Code, OpenAI Codex CLI, Cursor Agent CLI, Google Gemini CLI, or OpenCode CLI installed
 
 Verify your CLI is installed:
 
@@ -14,6 +14,9 @@ claude --version
 
 # For OpenAI Codex CLI
 codex --version
+
+# For Cursor Agent CLI
+agent --version
 
 # For Google Gemini CLI
 gemini --version
@@ -28,7 +31,7 @@ HAPI has three components:
 
 | Component | Role | Required |
 |-----------|------|----------|
-| **CLI** | Wraps AI agents (Claude/Codex/Gemini/OpenCode), runs sessions | Yes |
+| **CLI** | Wraps AI agents (Claude/Codex/Cursor/Gemini/OpenCode), runs sessions | Yes |
 | **Hub** | Central coordinator: persistence, real-time sync, remote access | Yes |
 | **Runner** | Background service for remote session spawning | Optional |
 
@@ -70,8 +73,11 @@ HAPI has three components:
 ## Install the CLI
 
 ```bash
-npm install -g @aiflyzx/hapi
+npm install -g @aiflyzx/hapi --registry=https://registry.npmjs.org
 ```
+
+> Recommendation: use the official npm registry for global install. Some mirrors may not sync platform packages in time.
+
 
 ## Other install options
 
@@ -166,7 +172,6 @@ On first run, HAPI:
 |----------|---------|---------------|-------------|
 | `CLI_API_TOKEN` | Auto-generated | `cliApiToken` | Shared secret for authentication |
 | `HAPI_API_URL` | `http://localhost:3006` | `apiUrl` | Hub URL for CLI connections |
-| `HAPI_HOSTNAME` | OS hostname | - | Override hostname reported to the server/UI |
 | `HAPI_LISTEN_HOST` | `127.0.0.1` | `listenHost` | Hub HTTP bind address |
 | `HAPI_LISTEN_PORT` | `3006` | `listenPort` | Hub HTTP port |
 | `HAPI_PUBLIC_URL` | - | `publicUrl` | Public URL for external access |

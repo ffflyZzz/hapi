@@ -143,7 +143,7 @@ describe('ApiClient core request flow', () => {
         vi.stubGlobal('fetch', fetchMock)
 
         const client = new ApiClient('token', { baseUrl: 'http://hub.local' })
-        await client.spawnSession('machine 1', '/tmp/work', 'codex', 'o3', true, 'worktree', 'feature-1')
+        await client.spawnSession('machine 1', '/tmp/work', 'codex', 'o3', undefined, true, 'worktree', 'feature-1')
 
         expect(fetchMock.mock.calls[0][0]).toBe('http://hub.local/api/machines/machine%201/spawn')
         expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
