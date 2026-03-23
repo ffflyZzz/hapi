@@ -1,0 +1,26 @@
+name: CI Main
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: latest
+
+            - run: bun install
+            - run: bun typecheck
+            - run: bun run test
+            - run: bun run build:web
+            - run: cd hub && bun run generate:embedded-web-assets && bun run build
+
+            - name: Verify dist
+              run: test -f hub/dist/index.js
