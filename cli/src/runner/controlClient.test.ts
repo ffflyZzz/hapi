@@ -186,7 +186,7 @@ describe('runner control client', () => {
         process.env.CLI_API_TOKEN = 'token-1';
         const state = {
             pid: 88,
-            startedWithCliVersion: '0.16.4',
+            startedWithCliVersion: '0.16.5',
             startedWithApiUrl: 'http://localhost:3006',
             startedWithMachineId: 'machine-1',
             startedWithCliApiTokenHash: hashRunnerCliApiToken('token-1'),
