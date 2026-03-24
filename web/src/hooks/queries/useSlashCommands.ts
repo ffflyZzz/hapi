@@ -39,10 +39,11 @@ const BUILTIN_COMMANDS: Record<string, SlashCommand[]> = {
     codex: [
         { name: 'review', description: 'Review current changes and find issues', source: 'builtin' },
         { name: 'new', description: 'Start a new chat during a conversation', source: 'builtin' },
-        { name: 'compat', description: 'Summarize conversation to prevent hitting the context limit', source: 'builtin' },
+        { name: 'compact', description: 'Summarize conversation to prevent hitting the context limit', source: 'builtin' },
         { name: 'undo', description: 'Ask Codex to undo a turn', source: 'builtin' },
         { name: 'diff', description: 'Show git diff including untracked files', source: 'builtin' },
         { name: 'status', description: 'Show current session configuration and token usage', source: 'builtin' },
+        { name: 'skills', description: 'Open the skill picker and insert a skill token', source: 'builtin' },
     ],
     gemini: [
         { name: 'about', description: 'Show version info', source: 'builtin' },
