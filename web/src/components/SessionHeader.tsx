@@ -2,7 +2,9 @@ import { useId, useMemo, useRef, useState } from 'react'
 import type { Session } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { isTelegramApp } from '@/hooks/useTelegram'
+import { useCodexTools } from '@/hooks/mutations/useCodexTools'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
+import { CodexToolsDrawer } from '@/components/CodexToolsDrawer'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -79,17 +81,28 @@ export function SessionHeader(props: {
     const menuAnchorRef = useRef<HTMLButtonElement | null>(null)
     const [renameOpen, setRenameOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
+    const [restoreOpen, setRestoreOpen] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
+    const [codexToolsOpen, setCodexToolsOpen] = useState(false)
+    const isCodexSession = session.metadata?.flavor === 'codex'
+    const isCodexRemote = isCodexSession && session.agentState?.controlledByUser !== true
+    const isCodexArchived = session.metadata?.lifecycleState === 'archived'
 
     const { archiveSession, renameSession, deleteSession, isPending } = useSessionActions(
         api,
         session.id,
         session.metadata?.flavor ?? null
     )
+    const { unarchiveThread, isPending: codexToolsPending } = useCodexTools(api, session.id)
+    const actionsPending = isPending || codexToolsPending
 
     const handleDelete = async () => {
         await deleteSession()
         onSessionDeleted?.()
+    }
+
+    const handleRestore = async () => {
+        await unarchiveThread()
     }
 
     const handleMenuToggle = () => {
@@ -182,9 +195,14 @@ export function SessionHeader(props: {
                 isOpen={menuOpen}
                 onClose={() => setMenuOpen(false)}
                 sessionActive={session.active}
+                isCodexSession={isCodexSession}
+                isCodexRemote={isCodexRemote}
+                isCodexArchived={isCodexArchived}
                 onRename={() => setRenameOpen(true)}
                 onArchive={() => setArchiveOpen(true)}
                 onDelete={() => setDeleteOpen(true)}
+                onRestore={() => setRestoreOpen(true)}
+                onOpenCodexTools={isCodexSession ? () => setCodexToolsOpen(true) : undefined}
                 anchorPoint={menuAnchorPoint}
                 menuId={menuId}
             />
@@ -200,13 +218,24 @@ export function SessionHeader(props: {
             <ConfirmDialog
                 isOpen={archiveOpen}
                 onClose={() => setArchiveOpen(false)}
-                title={t('dialog.archive.title')}
-                description={t('dialog.archive.description', { name: title })}
-                confirmLabel={t('dialog.archive.confirm')}
-                confirmingLabel={t('dialog.archive.confirming')}
+                title={t(isCodexRemote ? 'dialog.archiveThread.title' : 'dialog.archive.title')}
+                description={t(isCodexRemote ? 'dialog.archiveThread.description' : 'dialog.archive.description', { name: title })}
+                confirmLabel={t(isCodexRemote ? 'dialog.archiveThread.confirm' : 'dialog.archive.confirm')}
+                confirmingLabel={t(isCodexRemote ? 'dialog.archiveThread.confirming' : 'dialog.archive.confirming')}
                 onConfirm={archiveSession}
-                isPending={isPending}
+                isPending={actionsPending}
                 destructive
+            />
+
+            <ConfirmDialog
+                isOpen={restoreOpen}
+                onClose={() => setRestoreOpen(false)}
+                title={t('dialog.restoreThread.title')}
+                description={t('dialog.restoreThread.description', { name: title })}
+                confirmLabel={t('dialog.restoreThread.confirm')}
+                confirmingLabel={t('dialog.restoreThread.confirming')}
+                onConfirm={handleRestore}
+                isPending={actionsPending}
             />
 
             <ConfirmDialog
@@ -217,8 +246,18 @@ export function SessionHeader(props: {
                 confirmLabel={t('dialog.delete.confirm')}
                 confirmingLabel={t('dialog.delete.confirming')}
                 onConfirm={handleDelete}
-                isPending={isPending}
+                isPending={actionsPending}
                 destructive
+            />
+
+            <CodexToolsDrawer
+                isOpen={codexToolsOpen}
+                onClose={() => setCodexToolsOpen(false)}
+                api={api}
+                sessionId={session.id}
+                sessionName={title}
+                currentThreadId={session.metadata?.codexSessionId ?? null}
+                canCompact={isCodexRemote && session.active}
             />
         </>
     )

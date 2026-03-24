@@ -273,6 +273,62 @@ export class SessionCache {
         this.publisher.emit({ type: 'session-updated', sessionId, data: session })
     }
 
+    async patchSessionMetadata(
+        sessionId: string,
+        mutate: (metadata: NonNullable<Session['metadata']>) => NonNullable<Session['metadata']>
+    ): Promise<void> {
+        const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+        if (!session) {
+            throw new Error('Session not found')
+        }
+        if (!session.metadata) {
+            throw new Error('Session metadata missing')
+        }
+
+        const nextMetadata = mutate(session.metadata)
+        const result = this.store.sessions.updateSessionMetadata(
+            sessionId,
+            nextMetadata,
+            session.metadataVersion,
+            session.namespace,
+            { touchUpdatedAt: false }
+        )
+
+        if (result.result === 'error') {
+            throw new Error('Failed to update session metadata')
+        }
+        if (result.result === 'version-mismatch') {
+            throw new Error('Session metadata was modified concurrently')
+        }
+
+        this.refreshSession(sessionId)
+    }
+
+    async markSessionArchived(
+        sessionId: string,
+        options: { archivedBy: string; archiveReason: string; lifecycleStateSince?: number }
+    ): Promise<void> {
+        const lifecycleStateSince = options.lifecycleStateSince ?? Date.now()
+        await this.patchSessionMetadata(sessionId, (metadata) => ({
+            ...metadata,
+            lifecycleState: 'archived',
+            lifecycleStateSince,
+            archivedBy: options.archivedBy,
+            archiveReason: options.archiveReason
+        }))
+    }
+
+    async clearSessionArchived(sessionId: string): Promise<void> {
+        await this.patchSessionMetadata(sessionId, (metadata) => {
+            const nextMetadata: NonNullable<Session['metadata']> = { ...metadata }
+            delete nextMetadata.lifecycleState
+            delete nextMetadata.lifecycleStateSince
+            delete nextMetadata.archivedBy
+            delete nextMetadata.archiveReason
+            return nextMetadata
+        })
+    }
+
     async renameSession(sessionId: string, name: string): Promise<void> {
         const session = this.sessions.get(sessionId)
         if (!session) {

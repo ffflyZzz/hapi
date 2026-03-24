@@ -3,7 +3,7 @@ import type { SessionMetadataSummary } from '@/types/api'
 import { isObject } from '@hapi/protocol'
 import { BulbIcon, ClipboardIcon, EyeIcon, FileDiffIcon, GlobeIcon, MessageSquareIcon, PuzzleIcon, QuestionIcon, RocketIcon, SearchIcon, TerminalIcon, UsersIcon, WrenchIcon } from '@/components/ToolCard/icons'
 import type { ChecklistItem } from '@/components/ToolCard/checklist'
-import { extractTodoChecklist, extractUpdatePlanChecklist } from '@/components/ToolCard/checklist'
+import { extractTodoChecklist, extractUpdatePlanChecklist, extractUpdatePlanState } from '@/components/ToolCard/checklist'
 import { basename, resolveDisplayPath } from '@/utils/path'
 import { getInputStringAny, truncate } from '@/lib/toolInputUtils'
 
@@ -274,8 +274,16 @@ export const knownTools: Record<string, {
     update_plan: {
         icon: () => <ClipboardIcon className={DEFAULT_ICON_CLASS} />,
         title: () => 'Plan',
-        subtitle: (opts) => formatChecklistCount(extractUpdatePlanChecklist(opts.input, opts.result), 'step'),
-        minimal: (opts) => extractUpdatePlanChecklist(opts.input, opts.result).length === 0
+        subtitle: (opts) => {
+            const state = extractUpdatePlanState(opts.input, opts.result)
+            const count = formatChecklistCount(state.items, 'step')
+            if (count) return count
+            return state.draft ? 'Drafting…' : null
+        },
+        minimal: (opts) => {
+            const state = extractUpdatePlanState(opts.input, opts.result)
+            return state.items.length === 0 && !state.draft
+        }
     },
     CodexReasoning: {
         icon: () => <BulbIcon className={DEFAULT_ICON_CLASS} />,

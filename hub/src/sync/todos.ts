@@ -21,14 +21,22 @@ function extractTodosFromClaudeOutput(content: Record<string, unknown>): TodoIte
     for (const block of modelContent) {
         if (!isObject(block) || block.type !== 'tool_use') continue
         const name = typeof block.name === 'string' ? block.name : null
-        if (name !== 'TodoWrite') continue
         const input = 'input' in block ? (block as Record<string, unknown>).input : null
         if (!isObject(input)) continue
 
-        const todosCandidate = input.todos
-        const parsed = TodosSchema.safeParse(todosCandidate)
-        if (parsed.success) {
-            return parsed.data
+        if (name === 'TodoWrite') {
+            const todosCandidate = input.todos
+            const parsed = TodosSchema.safeParse(todosCandidate)
+            if (parsed.success) {
+                return parsed.data
+            }
+        }
+
+        if (name === 'update_plan') {
+            const todos = extractTodosFromPlanInput(input)
+            if (todos) {
+                return todos
+            }
         }
     }
 
@@ -42,13 +50,46 @@ function extractTodosFromCodexMessage(content: Record<string, unknown>): TodoIte
     if (!data || data.type !== 'tool-call') return null
 
     const name = typeof data.name === 'string' ? data.name : null
-    if (name !== 'TodoWrite') return null
-
     const input = 'input' in data ? (data as Record<string, unknown>).input : null
     if (!isObject(input)) return null
 
-    const todosCandidate = input.todos
-    const parsed = TodosSchema.safeParse(todosCandidate)
+    if (name === 'TodoWrite') {
+        const todosCandidate = input.todos
+        const parsed = TodosSchema.safeParse(todosCandidate)
+        return parsed.success ? parsed.data : null
+    }
+
+    if (name === 'update_plan') {
+        return extractTodosFromPlanInput(input)
+    }
+
+    return null
+}
+
+function normalizePlanStatus(value: unknown): 'pending' | 'in_progress' | 'completed' {
+    if (value === 'completed') return 'completed'
+    if (value === 'in_progress' || value === 'inProgress') return 'in_progress'
+    return 'pending'
+}
+
+function extractTodosFromPlanInput(input: Record<string, unknown>): TodoItem[] | null {
+    if (!Array.isArray(input.plan)) return null
+
+    const todos: TodoItem[] = []
+    input.plan.forEach((entry, index) => {
+        if (!isObject(entry)) return
+        const step = typeof entry.step === 'string' ? entry.step : null
+        if (!step) return
+        const id = typeof entry.id === 'string' ? entry.id : `plan-${index + 1}`
+        todos.push({
+            id,
+            content: step,
+            priority: 'medium',
+            status: normalizePlanStatus(entry.status)
+        })
+    })
+
+    const parsed = TodosSchema.safeParse(todos)
     return parsed.success ? parsed.data : null
 }
 

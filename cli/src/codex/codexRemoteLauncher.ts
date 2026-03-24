@@ -228,6 +228,82 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         let clearReadyAfterTurnTimer: (() => void) | null = null;
         let turnInFlight = false;
         let allowAnonymousTerminalEvent = false;
+        const planDraftBuffers = new Map<string, string>();
+
+        const emitPlanToolMessage = (msg: Record<string, unknown>) => {
+            const turnId = asString(msg.turn_id ?? msg.turnId) ?? 'latest';
+            const explanation = asString(msg.explanation);
+            const plan = Array.isArray(msg.plan) ? msg.plan : [];
+            const callId = `codex-plan:${turnId}`;
+            const input = {
+                ...(explanation ? { explanation } : {}),
+                plan
+            };
+            planDraftBuffers.delete(callId);
+
+            session.sendAgentMessage({
+                type: 'tool-call',
+                name: 'update_plan',
+                callId,
+                input,
+                id: randomUUID()
+            });
+            session.sendAgentMessage({
+                type: 'tool-call-result',
+                callId,
+                output: input,
+                id: randomUUID()
+            });
+        };
+
+        const emitPlanDraftToolMessage = (msg: Record<string, unknown>) => {
+            const delta = asString(msg.delta);
+            if (!delta) {
+                return;
+            }
+
+            const turnId = asString(msg.turn_id ?? msg.turnId);
+            const itemId = asString(msg.item_id ?? msg.itemId) ?? 'latest';
+            const callId = `codex-plan:${turnId ?? itemId}`;
+            const nextDraft = `${planDraftBuffers.get(callId) ?? ''}${delta}`;
+            planDraftBuffers.set(callId, nextDraft);
+
+            session.sendAgentMessage({
+                type: 'tool-call',
+                name: 'update_plan',
+                callId,
+                input: {
+                    draft: nextDraft,
+                    isDraft: true
+                },
+                id: randomUUID()
+            });
+        };
+
+        const emitCompactionToolMessage = (msgType: string, msg: Record<string, unknown>) => {
+            const callId = asString(msg.call_id ?? msg.callId) ?? 'codex-compaction';
+            if (msgType === 'context_compaction_begin') {
+                messageBuffer.addMessage('Compacting thread...', 'tool');
+                session.sendAgentMessage({
+                    type: 'tool-call',
+                    name: 'CodexCompactThread',
+                    callId,
+                    input: {},
+                    id: randomUUID()
+                });
+                return;
+            }
+
+            messageBuffer.addMessage('Thread compaction completed', 'status');
+            session.sendAgentMessage({
+                type: 'tool-call-result',
+                callId,
+                output: {
+                    ...(asString(msg.status) ? { status: asString(msg.status) } : {})
+                },
+                id: randomUUID()
+            });
+        };
 
         const handleCodexEvent = (msg: Record<string, unknown>) => {
             const msgType = asString(msg.type);
@@ -302,6 +378,15 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             } else if (msgType === 'task_failed') {
                 const error = asString(msg.error);
                 messageBuffer.addMessage(error ? `Task failed: ${error}` : 'Task failed', 'status');
+            } else if (msgType === 'thread_archived') {
+                messageBuffer.addMessage('Thread archived', 'status');
+            } else if (msgType === 'thread_unarchived') {
+                messageBuffer.addMessage('Thread restored', 'status');
+            } else if (msgType === 'thread_status_changed') {
+                const status = asString(msg.status);
+                if (status) {
+                    messageBuffer.addMessage(`Thread status: ${status}`, 'status');
+                }
             }
 
             if (msgType === 'task_started') {
@@ -324,6 +409,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 }
                 diffProcessor.reset();
                 appServerEventConverter.reset();
+                planDraftBuffers.clear();
             }
 
             if (isTerminalEvent && !turnInFlight) {
@@ -395,6 +481,15 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     ...msg,
                     id: randomUUID()
                 });
+            }
+            if (msgType === 'plan_updated') {
+                emitPlanToolMessage(msg);
+            }
+            if (msgType === 'plan_delta') {
+                emitPlanDraftToolMessage(msg);
+            }
+            if (msgType === 'context_compaction_begin' || msgType === 'context_compaction_end') {
+                emitCompactionToolMessage(msgType, msg);
             }
             if (msgType === 'patch_apply_begin') {
                 const callId = asString(msg.call_id ?? msg.callId);
@@ -512,6 +607,25 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         this.setupAbortHandlers(session.client.rpcHandlerManager, {
             onAbort: () => this.handleAbort(),
             onSwitch: () => this.handleSwitchRequest()
+        });
+        session.client.rpcHandlerManager.registerHandler('archive-thread', async () => {
+            if (!this.currentThreadId) {
+                throw new Error('No active Codex thread to archive');
+            }
+            const threadId = this.currentThreadId;
+            await appServerClient.archiveThread({ threadId });
+            return { threadId };
+        });
+        session.client.rpcHandlerManager.registerHandler('compact-thread', async () => {
+            if (!this.currentThreadId) {
+                throw new Error('No active Codex thread to compact');
+            }
+            if (turnInFlight || this.currentTurnId) {
+                throw new Error('Cannot compact Codex thread while a turn is in progress');
+            }
+            const threadId = this.currentThreadId;
+            await appServerClient.startThreadCompaction({ threadId });
+            return { threadId };
         });
 
         function logActiveHandles(tag: string) {

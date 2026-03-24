@@ -48,8 +48,20 @@ export function useSkills(
     })
 
     const skills = useMemo(() => {
-        if (query.data?.success && query.data.skills) {
-            return query.data.skills
+        if (query.data && 'success' in query.data) {
+            if (query.data.success && query.data.skills) {
+                return query.data.skills
+            }
+            return []
+        }
+
+        if (query.data?.data) {
+            return query.data.data
+                .flatMap((entry) => Array.isArray(entry.skills) ? entry.skills : [])
+                .map((skill) => ({
+                    name: skill.name,
+                    description: skill.description
+                }))
         }
         return []
     }, [query.data])

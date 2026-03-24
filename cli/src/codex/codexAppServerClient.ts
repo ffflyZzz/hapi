@@ -6,10 +6,28 @@ import type {
     InitializeResponse,
     ThreadStartParams,
     ThreadStartResponse,
+    ThreadArchiveParams,
+    ThreadArchiveResponse,
+    ThreadUnarchiveParams,
+    ThreadUnarchiveResponse,
+    ThreadCompactStartParams,
+    ThreadCompactStartResponse,
     ThreadReadParams,
     ThreadReadResponse,
     ThreadListParams,
     ThreadListResponse,
+    SkillsListParams,
+    SkillsListResponse,
+    McpServerStatusListParams,
+    McpServerStatusListResponse,
+    ConfigMcpServerReloadParams,
+    ConfigMcpServerReloadResponse,
+    ConfigReadParams,
+    ConfigReadResponse,
+    ConfigValueWriteParams,
+    ConfigValueWriteResponse,
+    ConfigBatchWriteParams,
+    ConfigBatchWriteResponse,
     ThreadResumeParams,
     ThreadResumeResponse,
     TurnStartParams,
@@ -165,12 +183,102 @@ export class CodexAppServerClient {
         return response as ThreadReadResponse;
     }
 
+    async archiveThread(params: ThreadArchiveParams, options?: { signal?: AbortSignal }): Promise<ThreadArchiveResponse> {
+        const response = await this.sendRequest('thread/archive', params, {
+            signal: options?.signal,
+            timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
+        });
+        return response as ThreadArchiveResponse;
+    }
+
+    async unarchiveThread(
+        params: ThreadUnarchiveParams,
+        options?: { signal?: AbortSignal }
+    ): Promise<ThreadUnarchiveResponse> {
+        const response = await this.sendRequest('thread/unarchive', params, {
+            signal: options?.signal,
+            timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
+        });
+        return response as ThreadUnarchiveResponse;
+    }
+
+    async startThreadCompaction(
+        params: ThreadCompactStartParams,
+        options?: { signal?: AbortSignal }
+    ): Promise<ThreadCompactStartResponse> {
+        const response = await this.sendRequest('thread/compact/start', params, {
+            signal: options?.signal,
+            timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
+        });
+        return response as ThreadCompactStartResponse;
+    }
+
     async listThreads(params?: ThreadListParams, options?: { signal?: AbortSignal }): Promise<ThreadListResponse> {
         const response = await this.sendRequest('thread/list', params ?? {}, {
             signal: options?.signal,
             timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
         });
         return response as ThreadListResponse;
+    }
+
+    async listSkills(params?: SkillsListParams, options?: { signal?: AbortSignal }): Promise<SkillsListResponse> {
+        const response = await this.sendRequest('skills/list', params ?? {}, {
+            signal: options?.signal,
+            timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
+        });
+        return response as SkillsListResponse;
+    }
+
+    async listMcpServerStatus(
+        params?: McpServerStatusListParams,
+        options?: { signal?: AbortSignal }
+    ): Promise<McpServerStatusListResponse> {
+        const response = await this.sendRequest('mcpServerStatus/list', params ?? {}, {
+            signal: options?.signal,
+            timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
+        });
+        return response as McpServerStatusListResponse;
+    }
+
+    async reloadMcpServerConfig(
+        params: ConfigMcpServerReloadParams = {},
+        options?: { signal?: AbortSignal }
+    ): Promise<ConfigMcpServerReloadResponse> {
+        const response = await this.sendRequest('config/mcpServer/reload', params, {
+            signal: options?.signal,
+            timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
+        });
+        return response as ConfigMcpServerReloadResponse;
+    }
+
+    async readConfig(params?: ConfigReadParams, options?: { signal?: AbortSignal }): Promise<ConfigReadResponse> {
+        const response = await this.sendRequest('config/read', params ?? {}, {
+            signal: options?.signal,
+            timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
+        });
+        return response as ConfigReadResponse;
+    }
+
+    async writeConfigValue(
+        params: ConfigValueWriteParams,
+        options?: { signal?: AbortSignal }
+    ): Promise<ConfigValueWriteResponse> {
+        const response = await this.sendRequest('config/value/write', params, {
+            signal: options?.signal,
+            timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
+        });
+        return response as ConfigValueWriteResponse;
+    }
+
+    async batchWriteConfig(
+        params: ConfigBatchWriteParams,
+        options?: { signal?: AbortSignal }
+    ): Promise<ConfigBatchWriteResponse> {
+        const response = await this.sendRequest('config/batchWrite', params, {
+            signal: options?.signal,
+            timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
+        });
+        return response as ConfigBatchWriteResponse;
     }
 
     async startTurn(params: TurnStartParams, options?: { signal?: AbortSignal }): Promise<TurnStartResponse> {

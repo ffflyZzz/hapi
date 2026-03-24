@@ -30,6 +30,10 @@ export type SessionMetadataSummary = {
     os?: string
     summary?: { text: string; updatedAt: number }
     machineId?: string
+    codexSessionId?: string
+    lifecycleState?: string
+    archivedBy?: string
+    archiveReason?: string
     tools?: string[]
     flavor?: string | null
     worktree?: WorktreeMetadata
@@ -188,10 +192,81 @@ export type SkillSummary = {
     description?: string
 }
 
-export type SkillsResponse = {
+export type LegacySkillsResponse = {
     success: boolean
     skills?: SkillSummary[]
     error?: string
+}
+
+export type CodexSkillDependency = {
+    type?: string
+    value?: string
+    description?: string
+    transport?: string
+    url?: string
+}
+
+export type CodexSkill = {
+    name: string
+    description?: string
+    path?: string
+    scope?: string
+    enabled?: boolean
+    interface?: {
+        displayName?: string
+        shortDescription?: string
+    }
+    dependencies?: {
+        tools?: CodexSkillDependency[]
+    }
+}
+
+export type CodexSkillsEntry = {
+    cwd?: string
+    skills?: CodexSkill[]
+    errors?: unknown[]
+}
+
+export type CodexSkillsResponse = {
+    data?: CodexSkillsEntry[]
+    error?: string
+}
+
+export type SkillsResponse = LegacySkillsResponse | CodexSkillsResponse
+
+export type CodexThreadResponse = {
+    thread?: Record<string, unknown>
+}
+
+export type CodexThreadListResponse = {
+    data?: Array<Record<string, unknown>>
+    nextCursor?: string | null
+}
+
+export type CodexConfigResponse = {
+    config?: Record<string, unknown>
+    origins?: Record<string, unknown>
+}
+
+export type CodexConfigWriteValueParams = {
+    keyPath: string
+    value: unknown
+    mergeStrategy?: string
+}
+
+export type CodexConfigBatchWriteEdit = {
+    keyPath: string
+    value: unknown
+    mergeStrategy?: string
+}
+
+export type CodexConfigBatchWriteParams = {
+    edits: CodexConfigBatchWriteEdit[]
+}
+
+export type CodexMcpStatusResponse = {
+    data?: Array<Record<string, unknown>>
+    nextCursor?: string | null
 }
 
 export type PushSubscriptionKeys = {

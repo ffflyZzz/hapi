@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import type { SessionSummary } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
+import { useCodexTools } from '@/hooks/mutations/useCodexTools'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
+import { CodexToolsDrawer } from '@/components/CodexToolsDrawer'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -176,13 +178,20 @@ function SessionItem(props: {
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
     const [renameOpen, setRenameOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
+    const [restoreOpen, setRestoreOpen] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
+    const [codexToolsOpen, setCodexToolsOpen] = useState(false)
+    const isCodexSession = s.metadata?.flavor === 'codex'
+    const isCodexRemote = isCodexSession && !s.controlledByUser
+    const isCodexArchived = s.metadata?.lifecycleState === 'archived'
 
     const { archiveSession, renameSession, deleteSession, isPending } = useSessionActions(
         api,
         s.id,
         s.metadata?.flavor ?? null
     )
+    const { unarchiveThread, isPending: codexToolsPending } = useCodexTools(api, s.id)
+    const actionsPending = isPending || codexToolsPending
 
     const longPressHandlers = useLongPress({
         onLongPress: (point) => {
@@ -274,9 +283,14 @@ function SessionItem(props: {
                 isOpen={menuOpen}
                 onClose={() => setMenuOpen(false)}
                 sessionActive={s.active}
+                isCodexSession={isCodexSession}
+                isCodexRemote={isCodexRemote}
+                isCodexArchived={isCodexArchived}
                 onRename={() => setRenameOpen(true)}
                 onArchive={() => setArchiveOpen(true)}
                 onDelete={() => setDeleteOpen(true)}
+                onRestore={() => setRestoreOpen(true)}
+                onOpenCodexTools={isCodexSession ? () => setCodexToolsOpen(true) : undefined}
                 anchorPoint={menuAnchorPoint}
             />
 
@@ -291,13 +305,24 @@ function SessionItem(props: {
             <ConfirmDialog
                 isOpen={archiveOpen}
                 onClose={() => setArchiveOpen(false)}
-                title={t('dialog.archive.title')}
-                description={t('dialog.archive.description', { name: sessionName })}
-                confirmLabel={t('dialog.archive.confirm')}
-                confirmingLabel={t('dialog.archive.confirming')}
+                title={t(isCodexRemote ? 'dialog.archiveThread.title' : 'dialog.archive.title')}
+                description={t(isCodexRemote ? 'dialog.archiveThread.description' : 'dialog.archive.description', { name: sessionName })}
+                confirmLabel={t(isCodexRemote ? 'dialog.archiveThread.confirm' : 'dialog.archive.confirm')}
+                confirmingLabel={t(isCodexRemote ? 'dialog.archiveThread.confirming' : 'dialog.archive.confirming')}
                 onConfirm={archiveSession}
-                isPending={isPending}
+                isPending={actionsPending}
                 destructive
+            />
+
+            <ConfirmDialog
+                isOpen={restoreOpen}
+                onClose={() => setRestoreOpen(false)}
+                title={t('dialog.restoreThread.title')}
+                description={t('dialog.restoreThread.description', { name: sessionName })}
+                confirmLabel={t('dialog.restoreThread.confirm')}
+                confirmingLabel={t('dialog.restoreThread.confirming')}
+                onConfirm={unarchiveThread}
+                isPending={actionsPending}
             />
 
             <ConfirmDialog
@@ -308,8 +333,18 @@ function SessionItem(props: {
                 confirmLabel={t('dialog.delete.confirm')}
                 confirmingLabel={t('dialog.delete.confirming')}
                 onConfirm={deleteSession}
-                isPending={isPending}
+                isPending={actionsPending}
                 destructive
+            />
+
+            <CodexToolsDrawer
+                isOpen={codexToolsOpen}
+                onClose={() => setCodexToolsOpen(false)}
+                api={api}
+                sessionId={s.id}
+                sessionName={sessionName}
+                currentThreadId={s.metadata?.codexSessionId ?? null}
+                canCompact={isCodexRemote && s.active}
             />
         </>
     )

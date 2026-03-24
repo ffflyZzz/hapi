@@ -15,4 +15,14 @@ export const queryKeys = {
     ] as const,
     slashCommands: (sessionId: string) => ['slash-commands', sessionId] as const,
     skills: (sessionId: string) => ['skills', sessionId] as const,
+    codexSkills: (sessionId: string, forceReload: boolean) => ['codex-skills', sessionId, forceReload ? 'force' : 'cached'] as const,
+    codexThread: (sessionId: string) => ['codex-thread', sessionId] as const,
+    codexThreads: (sessionId: string, archived: boolean) => ['codex-threads', sessionId, archived ? 'archived' : 'active'] as const,
+    codexConfig: (sessionId: string, includeLayers: boolean) => ['codex-config', sessionId, includeLayers ? 'layers' : 'effective'] as const,
+    codexMcpStatus: (sessionId: string, cursor: string | null | undefined, limit: number | undefined) => [
+        'codex-mcp-status',
+        sessionId,
+        cursor ?? null,
+        limit ?? null
+    ] as const,
 }

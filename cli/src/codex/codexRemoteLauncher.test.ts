@@ -5,7 +5,10 @@ import type { EnhancedMode } from './loop';
 const harness = vi.hoisted(() => ({
     notifications: [] as Array<{ method: string; params: unknown }>,
     registerRequestCalls: [] as string[],
-    initializeCalls: [] as unknown[]
+    initializeCalls: [] as unknown[],
+    archiveCalls: [] as unknown[],
+    compactCalls: [] as unknown[],
+    scriptedNotifications: [] as Array<{ method: string; params: unknown }>
 }));
 
 vi.mock('./codexAppServerClient', () => {
@@ -40,11 +43,26 @@ vi.mock('./codexAppServerClient', () => {
             harness.notifications.push({ method: 'turn/started', params: started });
             this.notificationHandler?.('turn/started', started);
 
+            for (const notification of harness.scriptedNotifications) {
+                harness.notifications.push(notification);
+                this.notificationHandler?.(notification.method, notification.params);
+            }
+
             const completed = { status: 'Completed', turn: {} };
             harness.notifications.push({ method: 'turn/completed', params: completed });
             this.notificationHandler?.('turn/completed', completed);
 
             return { turn: {} };
+        }
+
+        async archiveThread(params: unknown): Promise<Record<string, never>> {
+            harness.archiveCalls.push(params);
+            return {};
+        }
+
+        async startThreadCompaction(params: unknown): Promise<Record<string, never>> {
+            harness.compactCalls.push(params);
+            return {};
         }
 
         async interruptTurn(): Promise<Record<string, never>> {
@@ -168,6 +186,9 @@ describe('codexRemoteLauncher', () => {
         harness.notifications = [];
         harness.registerRequestCalls = [];
         harness.initializeCalls = [];
+        harness.archiveCalls = [];
+        harness.compactCalls = [];
+        harness.scriptedNotifications = [];
     });
 
     it('finishes a turn and emits ready when task lifecycle events omit turn_id', async () => {
@@ -197,5 +218,98 @@ describe('codexRemoteLauncher', () => {
         expect(sessionEvents.filter((event) => event.type === 'ready').length).toBeGreaterThanOrEqual(1);
         expect(thinkingChanges).toContain(true);
         expect(session.thinking).toBe(false);
+    });
+
+    it('registers live archive/compact handlers and emits plan draft, final plan, plus compaction tool messages', async () => {
+        harness.scriptedNotifications = [
+            {
+                method: 'item/started',
+                params: {
+                    turnId: 'turn-1',
+                    item: { id: 'plan-1', type: 'plan', text: '' }
+                }
+            },
+            {
+                method: 'item/plan/delta',
+                params: {
+                    turnId: 'turn-1',
+                    itemId: 'plan-1',
+                    delta: 'Planning draft...'
+                }
+            },
+            {
+                method: 'turn/plan/updated',
+                params: {
+                    turnId: 'turn-1',
+                    explanation: 'Ship admin UI',
+                    plan: [
+                        { step: 'Add routes', status: 'completed' },
+                        { step: 'Render plan card', status: 'inProgress' }
+                    ]
+                }
+            },
+            {
+                method: 'item/started',
+                params: {
+                    item: { id: 'compact-1', type: 'contextCompaction' }
+                }
+            },
+            {
+                method: 'item/completed',
+                params: {
+                    item: { id: 'compact-1', type: 'contextCompaction', status: 'completed' }
+                }
+            }
+        ];
+
+        const { session, codexMessages, rpcHandlers } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        expect(rpcHandlers.has('archive-thread')).toBe(true);
+        expect(rpcHandlers.has('compact-thread')).toBe(true);
+
+        await rpcHandlers.get('archive-thread')?.({});
+        await rpcHandlers.get('compact-thread')?.({});
+
+        expect(harness.archiveCalls).toEqual([{ threadId: 'thread-anonymous' }]);
+        expect(harness.compactCalls).toEqual([{ threadId: 'thread-anonymous' }]);
+
+        expect(codexMessages).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'tool-call',
+                name: 'update_plan',
+                callId: 'codex-plan:turn-1',
+                input: {
+                    draft: 'Planning draft...',
+                    isDraft: true
+                }
+            }),
+            expect.objectContaining({
+                type: 'tool-call',
+                name: 'update_plan',
+                callId: 'codex-plan:turn-1',
+                input: {
+                    explanation: 'Ship admin UI',
+                    plan: [
+                        { step: 'Add routes', status: 'completed' },
+                        { step: 'Render plan card', status: 'in_progress' }
+                    ]
+                }
+            }),
+            expect.objectContaining({
+                type: 'tool-call-result',
+                callId: 'codex-plan:turn-1'
+            }),
+            expect.objectContaining({
+                type: 'tool-call',
+                name: 'CodexCompactThread',
+                callId: 'compact-1'
+            }),
+            expect.objectContaining({
+                type: 'tool-call-result',
+                callId: 'compact-1'
+            })
+        ]));
     });
 });

@@ -136,6 +136,91 @@ describe('AppServerEventConverter', () => {
         expect(events).toEqual([{ type: 'turn_diff', unified_diff: 'diff --git a b' }]);
     });
 
+    it('maps thread archive lifecycle updates', () => {
+        const converter = new AppServerEventConverter();
+
+        expect(converter.handleNotification('thread/archived', { threadId: 'thread-1' }))
+            .toEqual([{ type: 'thread_archived', thread_id: 'thread-1' }]);
+        expect(converter.handleNotification('thread/unarchived', { threadId: 'thread-1' }))
+            .toEqual([{ type: 'thread_unarchived', thread_id: 'thread-1' }]);
+        expect(converter.handleNotification('thread/status/changed', { threadId: 'thread-1', status: 'active' }))
+            .toEqual([{ type: 'thread_status_changed', thread_id: 'thread-1', status: 'active' }]);
+    });
+
+    it('maps plan updates and plan deltas', () => {
+        const converter = new AppServerEventConverter();
+
+        const updated = converter.handleNotification('turn/plan/updated', {
+            turnId: 'turn-1',
+            explanation: 'Ship admin UI',
+            plan: [
+                { step: 'Add routes', status: 'completed' },
+                { step: 'Render plan card', status: 'inProgress' }
+            ]
+        });
+
+        expect(updated).toEqual([{
+            type: 'plan_updated',
+            turn_id: 'turn-1',
+            explanation: 'Ship admin UI',
+            plan: [
+                { step: 'Add routes', status: 'completed' },
+                { step: 'Render plan card', status: 'in_progress' }
+            ]
+        }]);
+
+        const delta = converter.handleNotification('item/plan/delta', {
+            itemId: 'plan-1',
+            turnId: 'turn-1',
+            delta: 'Planning...'
+        });
+        expect(delta).toEqual([{
+            type: 'plan_delta',
+            item_id: 'plan-1',
+            turn_id: 'turn-1',
+            delta: 'Planning...'
+        }]);
+
+        const started = converter.handleNotification('item/started', {
+            turnId: 'turn-1',
+            item: { id: 'plan-1', type: 'plan', text: '' }
+        });
+        expect(started).toEqual([{
+            type: 'plan_item_started',
+            item_id: 'plan-1',
+            turn_id: 'turn-1'
+        }]);
+
+        const completed = converter.handleNotification('item/completed', {
+            turnId: 'turn-1',
+            item: { id: 'plan-1', type: 'plan', text: 'Final draft text' }
+        });
+        expect(completed).toEqual([{
+            type: 'plan_item_completed',
+            item_id: 'plan-1',
+            turn_id: 'turn-1',
+            text: 'Final draft text'
+        }]);
+    });
+
+    it('maps context compaction item lifecycle', () => {
+        const converter = new AppServerEventConverter();
+
+        const started = converter.handleNotification('item/started', {
+            item: { id: 'compact-1', type: 'contextCompaction' }
+        });
+        expect(started).toEqual([{ type: 'context_compaction_begin', call_id: 'compact-1' }]);
+
+        const completed = converter.handleNotification('item/completed', {
+            item: { id: 'compact-1', type: 'contextCompaction', status: 'completed' }
+        });
+        expect(completed).toEqual([{
+            type: 'context_compaction_end',
+            call_id: 'compact-1',
+            status: 'completed'
+        }]);
+    });
+
     it('unwraps codex/event task lifecycle', () => {
         const converter = new AppServerEventConverter();
 

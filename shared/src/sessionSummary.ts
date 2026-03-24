@@ -4,6 +4,10 @@ export type SessionSummaryMetadata = {
     name?: string
     path: string
     machineId?: string
+    codexSessionId?: string
+    lifecycleState?: string
+    archivedBy?: string
+    archiveReason?: string
     summary?: { text: string }
     flavor?: string | null
     worktree?: WorktreeMetadata
@@ -13,6 +17,7 @@ export type SessionSummary = {
     id: string
     active: boolean
     thinking: boolean
+    controlledByUser: boolean
     activeAt: number
     updatedAt: number
     metadata: SessionSummaryMetadata | null
@@ -28,6 +33,10 @@ export function toSessionSummary(session: Session): SessionSummary {
         name: session.metadata.name,
         path: session.metadata.path,
         machineId: session.metadata.machineId ?? undefined,
+        codexSessionId: session.metadata.codexSessionId ?? undefined,
+        lifecycleState: session.metadata.lifecycleState ?? undefined,
+        archivedBy: session.metadata.archivedBy ?? undefined,
+        archiveReason: session.metadata.archiveReason ?? undefined,
         summary: session.metadata.summary ? { text: session.metadata.summary.text } : undefined,
         flavor: session.metadata.flavor ?? null,
         worktree: session.metadata.worktree
@@ -42,6 +51,7 @@ export function toSessionSummary(session: Session): SessionSummary {
         id: session.id,
         active: session.active,
         thinking: session.thinking,
+        controlledByUser: session.agentState?.controlledByUser === true,
         activeAt: session.activeAt,
         updatedAt: session.updatedAt,
         metadata,

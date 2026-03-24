@@ -2,6 +2,12 @@ import type {
     AttachmentMetadata,
     AuthResponse,
     CodexCollaborationMode,
+    CodexConfigResponse,
+    CodexConfigWriteValueParams,
+    CodexConfigBatchWriteParams,
+    CodexMcpStatusResponse,
+    CodexThreadListResponse,
+    CodexThreadResponse,
     DeleteUploadResponse,
     ListDirectoryResponse,
     FileReadResponse,
@@ -400,10 +406,100 @@ export class ApiClient {
         )
     }
 
-    async getSkills(sessionId: string): Promise<SkillsResponse> {
+    async getSkills(sessionId: string, options?: { forceReload?: boolean }): Promise<SkillsResponse> {
+        const params = new URLSearchParams()
+        if (options?.forceReload) {
+            params.set('forceReload', 'true')
+        }
         return await this.request<SkillsResponse>(
-            `/api/sessions/${encodeURIComponent(sessionId)}/skills`
+            `/api/sessions/${encodeURIComponent(sessionId)}/skills${params.toString() ? `?${params.toString()}` : ''}`
         )
+    }
+
+    async getCodexThread(sessionId: string): Promise<CodexThreadResponse> {
+        return await this.request<CodexThreadResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/codex/thread`
+        )
+    }
+
+    async getCodexThreads(
+        sessionId: string,
+        options?: { archived?: boolean; cursor?: string | null; limit?: number }
+    ): Promise<CodexThreadListResponse> {
+        const params = new URLSearchParams()
+        if (options?.archived !== undefined) {
+            params.set('archived', options.archived ? 'true' : 'false')
+        }
+        if (options?.cursor) {
+            params.set('cursor', options.cursor)
+        }
+        if (options?.limit !== undefined) {
+            params.set('limit', `${options.limit}`)
+        }
+        return await this.request<CodexThreadListResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/codex/threads${params.toString() ? `?${params.toString()}` : ''}`
+        )
+    }
+
+    async getCodexConfig(sessionId: string, options?: { includeLayers?: boolean }): Promise<CodexConfigResponse> {
+        const params = new URLSearchParams()
+        if (options?.includeLayers !== undefined) {
+            params.set('includeLayers', options.includeLayers ? 'true' : 'false')
+        }
+        return await this.request<CodexConfigResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/codex/config${params.toString() ? `?${params.toString()}` : ''}`
+        )
+    }
+
+    async writeCodexConfigValue(sessionId: string, params: CodexConfigWriteValueParams): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/codex/config/value`, {
+            method: 'POST',
+            body: JSON.stringify(params)
+        })
+    }
+
+    async batchWriteCodexConfig(sessionId: string, params: CodexConfigBatchWriteParams): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/codex/config/batch`, {
+            method: 'POST',
+            body: JSON.stringify(params)
+        })
+    }
+
+    async getCodexMcpStatus(
+        sessionId: string,
+        options?: { cursor?: string | null; limit?: number }
+    ): Promise<CodexMcpStatusResponse> {
+        const params = new URLSearchParams()
+        if (options?.cursor) {
+            params.set('cursor', options.cursor)
+        }
+        if (options?.limit !== undefined) {
+            params.set('limit', `${options.limit}`)
+        }
+        return await this.request<CodexMcpStatusResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/codex/mcp-status${params.toString() ? `?${params.toString()}` : ''}`
+        )
+    }
+
+    async reloadCodexMcpConfig(sessionId: string): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/codex/mcp-reload`, {
+            method: 'POST',
+            body: JSON.stringify({})
+        })
+    }
+
+    async unarchiveCodexThread(sessionId: string): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/codex/unarchive-thread`, {
+            method: 'POST',
+            body: JSON.stringify({})
+        })
+    }
+
+    async compactCodexThread(sessionId: string): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/codex/compact-thread`, {
+            method: 'POST',
+            body: JSON.stringify({})
+        })
     }
 
     async renameSession(sessionId: string, name: string): Promise<void> {

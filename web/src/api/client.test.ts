@@ -155,4 +155,72 @@ describe('ApiClient core request flow', () => {
             worktreeName: 'feature-1',
         })
     })
+
+    it('builds Codex admin URLs with query params and POST actions', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(makeJsonResponse({
+                thread: { id: 'thread-1' }
+            }))
+            .mockResolvedValueOnce(makeJsonResponse({
+                data: [{ id: 'thread-1' }],
+                nextCursor: null
+            }))
+            .mockResolvedValueOnce(makeJsonResponse({
+                config: { apps: { _default: { enabled: true } } },
+                origins: {}
+            }))
+            .mockResolvedValueOnce(makeJsonResponse({
+                data: [],
+                nextCursor: null
+            }))
+            .mockResolvedValueOnce(makeJsonResponse({}))
+            .mockResolvedValueOnce(makeJsonResponse({ ok: true }))
+            .mockResolvedValueOnce(makeJsonResponse({ ok: true }))
+            .mockResolvedValueOnce(makeJsonResponse({ ok: true }))
+            .mockResolvedValueOnce(makeJsonResponse({ ok: true }))
+            .mockResolvedValueOnce(makeJsonResponse({
+                data: [{ cwd: '/tmp/project', skills: [{ name: 'skill-creator' }], errors: [] }]
+            }))
+        vi.stubGlobal('fetch', fetchMock)
+
+        const client = new ApiClient('token', { baseUrl: 'http://hub.local' })
+        await client.getCodexThread('session/1')
+        await client.getCodexThreads('session/1', { archived: true, limit: 10 })
+        await client.getCodexConfig('session/1', { includeLayers: true })
+        await client.getCodexMcpStatus('session/1', { cursor: 'next', limit: 25 })
+        await client.reloadCodexMcpConfig('session/1')
+        await client.unarchiveCodexThread('session/1')
+        await client.compactCodexThread('session/1')
+        await client.writeCodexConfigValue('session/1', {
+            keyPath: 'apps._default.enabled',
+            value: false,
+            mergeStrategy: 'replace'
+        })
+        await client.batchWriteCodexConfig('session/1', {
+            edits: [
+                {
+                    keyPath: 'apps._default.enabled',
+                    value: true,
+                    mergeStrategy: 'upsert'
+                }
+            ]
+        })
+        await client.getSkills('session/1', { forceReload: true })
+
+        expect(fetchMock.mock.calls[0][0]).toBe('http://hub.local/api/sessions/session%2F1/codex/thread')
+        expect(fetchMock.mock.calls[1][0]).toBe('http://hub.local/api/sessions/session%2F1/codex/threads?archived=true&limit=10')
+        expect(fetchMock.mock.calls[2][0]).toBe('http://hub.local/api/sessions/session%2F1/codex/config?includeLayers=true')
+        expect(fetchMock.mock.calls[3][0]).toBe('http://hub.local/api/sessions/session%2F1/codex/mcp-status?cursor=next&limit=25')
+        expect(fetchMock.mock.calls[4][0]).toBe('http://hub.local/api/sessions/session%2F1/codex/mcp-reload')
+        expect(fetchMock.mock.calls[5][0]).toBe('http://hub.local/api/sessions/session%2F1/codex/unarchive-thread')
+        expect(fetchMock.mock.calls[6][0]).toBe('http://hub.local/api/sessions/session%2F1/codex/compact-thread')
+        expect(fetchMock.mock.calls[7][0]).toBe('http://hub.local/api/sessions/session%2F1/codex/config/value')
+        expect(fetchMock.mock.calls[8][0]).toBe('http://hub.local/api/sessions/session%2F1/codex/config/batch')
+        expect(fetchMock.mock.calls[9][0]).toBe('http://hub.local/api/sessions/session%2F1/skills?forceReload=true')
+        expect(fetchMock.mock.calls[4][1]).toEqual(expect.objectContaining({ method: 'POST' }))
+        expect(fetchMock.mock.calls[5][1]).toEqual(expect.objectContaining({ method: 'POST' }))
+        expect(fetchMock.mock.calls[6][1]).toEqual(expect.objectContaining({ method: 'POST' }))
+        expect(fetchMock.mock.calls[7][1]).toEqual(expect.objectContaining({ method: 'POST' }))
+        expect(fetchMock.mock.calls[8][1]).toEqual(expect.objectContaining({ method: 'POST' }))
+    })
 })

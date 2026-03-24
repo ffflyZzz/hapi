@@ -13,9 +13,14 @@ type SessionActionMenuProps = {
     isOpen: boolean
     onClose: () => void
     sessionActive: boolean
+    isCodexSession?: boolean
+    isCodexRemote?: boolean
+    isCodexArchived?: boolean
     onRename: () => void
     onArchive: () => void
     onDelete: () => void
+    onRestore?: () => void
+    onOpenCodexTools?: () => void
     anchorPoint: { x: number; y: number }
     menuId?: string
 }
@@ -84,6 +89,46 @@ function TrashIcon(props: { className?: string }) {
     )
 }
 
+function WrenchIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <path d="M14.7 6.3a4 4 0 0 0 3 5.4L21 15l-6 6-3.3-3.3-6.4-6.4a4 4 0 0 0 5.4-3l4-4Z" />
+            <path d="m5 21 2-2" />
+        </svg>
+    )
+}
+
+function RestoreIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <path d="M3 7v6h6" />
+            <path d="M3 13a9 9 0 1 0 3-7" />
+        </svg>
+    )
+}
+
 type MenuPosition = {
     top: number
     left: number
@@ -96,9 +141,14 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         isOpen,
         onClose,
         sessionActive,
+        isCodexSession = false,
+        isCodexRemote = false,
+        isCodexArchived = false,
         onRename,
         onArchive,
         onDelete,
+        onRestore,
+        onOpenCodexTools,
         anchorPoint,
         menuId
     } = props
@@ -121,6 +171,16 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
     const handleDelete = () => {
         onClose()
         onDelete()
+    }
+
+    const handleRestore = () => {
+        onClose()
+        onRestore?.()
+    }
+
+    const handleOpenCodexTools = () => {
+        onClose()
+        onOpenCodexTools?.()
     }
 
     const updatePosition = useCallback(() => {
@@ -239,7 +299,57 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     {t('session.action.rename')}
                 </button>
 
-                {sessionActive ? (
+                {isCodexSession && onOpenCodexTools ? (
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                        onClick={handleOpenCodexTools}
+                    >
+                        <WrenchIcon className="text-[var(--app-hint)]" />
+                        {t('session.action.codexTools')}
+                    </button>
+                ) : null}
+
+                {isCodexSession ? (
+                    <>
+                        {sessionActive && isCodexRemote ? (
+                            <button
+                                type="button"
+                                role="menuitem"
+                                className={`${baseItemClassName} text-red-500 hover:bg-red-500/10`}
+                                onClick={handleArchive}
+                            >
+                                <ArchiveIcon className="text-red-500" />
+                                {t('session.action.archiveThread')}
+                            </button>
+                        ) : null}
+
+                        {!sessionActive && isCodexArchived && onRestore ? (
+                            <button
+                                type="button"
+                                role="menuitem"
+                                className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                                onClick={handleRestore}
+                            >
+                                <RestoreIcon className="text-[var(--app-hint)]" />
+                                {t('session.action.restoreThread')}
+                            </button>
+                        ) : null}
+
+                        {!sessionActive ? (
+                            <button
+                                type="button"
+                                role="menuitem"
+                                className={`${baseItemClassName} text-red-500 hover:bg-red-500/10`}
+                                onClick={handleDelete}
+                            >
+                                <TrashIcon className="text-red-500" />
+                                {t('session.action.delete')}
+                            </button>
+                        ) : null}
+                    </>
+                ) : sessionActive ? (
                     <button
                         type="button"
                         role="menuitem"

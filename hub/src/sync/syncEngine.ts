@@ -16,6 +16,13 @@ import { EventPublisher, type SyncEventListener } from './eventPublisher'
 import { MachineCache, type Machine } from './machineCache'
 import { MessageService } from './messageService'
 import {
+    RpcCodexConfigBatchWriteParams,
+    RpcCodexConfigResponse,
+    RpcCodexConfigWriteValueParams,
+    RpcCodexMcpStatusResponse,
+    RpcCodexSkillsResponse,
+    RpcCodexThreadListResponse,
+    RpcCodexThreadReadResponse,
     RpcGateway,
     type RpcCommandResponse,
     type RpcDeleteUploadResponse,
@@ -30,6 +37,11 @@ export type { Session, SyncEvent } from '@hapi/protocol/types'
 export type { Machine } from './machineCache'
 export type { SyncEventListener } from './eventPublisher'
 export type {
+    RpcCodexConfigResponse,
+    RpcCodexMcpStatusResponse,
+    RpcCodexSkillsResponse,
+    RpcCodexThreadListResponse,
+    RpcCodexThreadReadResponse,
     RpcCommandResponse,
     RpcDeleteUploadResponse,
     RpcListDirectoryResponse,
@@ -135,6 +147,41 @@ export class SyncEngine {
 
     getMachineByNamespace(machineId: string, namespace: string): Machine | undefined {
         return this.machineCache.getMachineByNamespace(machineId, namespace)
+    }
+
+    private resolveCodexMachineContext(sessionId: string): {
+        session: Session
+        machineId: string
+        path: string
+        threadId: string | null
+    } {
+        const session = this.getSession(sessionId)
+        if (!session) {
+            throw new Error('Session not found')
+        }
+
+        const metadata = session.metadata
+        if (!metadata || metadata.flavor !== 'codex') {
+            throw new Error('Codex session required')
+        }
+        if (typeof metadata.machineId !== 'string' || metadata.machineId.length === 0) {
+            throw new Error('Codex session missing machineId')
+        }
+        if (typeof metadata.path !== 'string' || metadata.path.length === 0) {
+            throw new Error('Codex session missing path')
+        }
+
+        const machine = this.machineCache.getMachine(metadata.machineId)
+        if (!machine?.active) {
+            throw new Error('Codex machine offline')
+        }
+
+        return {
+            session,
+            machineId: metadata.machineId,
+            path: metadata.path,
+            threadId: typeof metadata.codexSessionId === 'string' ? metadata.codexSessionId : null
+        }
     }
 
     getOnlineMachines(): Machine[] {
@@ -264,6 +311,35 @@ export class SyncEngine {
     async archiveSession(sessionId: string): Promise<void> {
         await this.rpcGateway.killSession(sessionId)
         this.handleSessionEnd({ sid: sessionId, time: Date.now() })
+    }
+
+    async archiveCodexThread(sessionId: string): Promise<void> {
+        const session = this.getSession(sessionId)
+        if (!session) {
+            throw new Error('Session not found')
+        }
+        if ((session.metadata?.flavor ?? 'claude') !== 'codex') {
+            throw new Error('Codex session required')
+        }
+
+        await this.rpcGateway.archiveCodexThread(sessionId)
+        await this.sessionCache.markSessionArchived(sessionId, {
+            archivedBy: 'user',
+            archiveReason: 'Archived thread via web'
+        })
+        this.handleSessionEnd({ sid: sessionId, time: Date.now() })
+    }
+
+    async compactCodexThread(sessionId: string): Promise<void> {
+        const session = this.getSession(sessionId)
+        if (!session) {
+            throw new Error('Session not found')
+        }
+        if ((session.metadata?.flavor ?? 'claude') !== 'codex') {
+            throw new Error('Codex session required')
+        }
+
+        await this.rpcGateway.compactCodexThread(sessionId)
     }
 
     async switchSession(sessionId: string, to: 'remote' | 'local'): Promise<void> {
@@ -472,5 +548,73 @@ export class SyncEngine {
         error?: string
     }> {
         return await this.rpcGateway.listSkills(sessionId)
+    }
+
+    async readCodexThread(sessionId: string): Promise<RpcCodexThreadReadResponse> {
+        const { machineId, threadId } = this.resolveCodexMachineContext(sessionId)
+        if (!threadId) {
+            throw new Error('Codex thread ID unavailable')
+        }
+        return await this.rpcGateway.readCodexThread(machineId, { threadId, includeTurns: true })
+    }
+
+    async listCodexThreads(
+        sessionId: string,
+        options: { cursor?: string | null; limit?: number; archived?: boolean }
+    ): Promise<RpcCodexThreadListResponse> {
+        const { machineId, path } = this.resolveCodexMachineContext(sessionId)
+        return await this.rpcGateway.listCodexThreads(machineId, { ...options, cwd: path })
+    }
+
+    async unarchiveCodexThread(sessionId: string): Promise<RpcCodexThreadReadResponse> {
+        const { machineId, threadId } = this.resolveCodexMachineContext(sessionId)
+        if (!threadId) {
+            throw new Error('Codex thread ID unavailable')
+        }
+        const result = await this.rpcGateway.unarchiveCodexThread(machineId, threadId)
+        await this.sessionCache.clearSessionArchived(sessionId)
+        return result
+    }
+
+    async listCodexSkills(sessionId: string, options: { forceReload?: boolean } = {}): Promise<RpcCodexSkillsResponse> {
+        const { machineId, path } = this.resolveCodexMachineContext(sessionId)
+        return await this.rpcGateway.listCodexSkills(machineId, { cwd: path, forceReload: options.forceReload })
+    }
+
+    async readCodexConfig(
+        sessionId: string,
+        options: { includeLayers?: boolean } = {}
+    ): Promise<RpcCodexConfigResponse> {
+        const { machineId } = this.resolveCodexMachineContext(sessionId)
+        return await this.rpcGateway.readCodexConfig(machineId, options)
+    }
+
+    async writeCodexConfigValue(
+        sessionId: string,
+        params: RpcCodexConfigWriteValueParams
+    ): Promise<Record<string, unknown>> {
+        const { machineId } = this.resolveCodexMachineContext(sessionId)
+        return await this.rpcGateway.writeCodexConfigValue(machineId, params)
+    }
+
+    async batchWriteCodexConfig(
+        sessionId: string,
+        params: RpcCodexConfigBatchWriteParams
+    ): Promise<Record<string, unknown>> {
+        const { machineId } = this.resolveCodexMachineContext(sessionId)
+        return await this.rpcGateway.batchWriteCodexConfig(machineId, params)
+    }
+
+    async reloadCodexMcpServerConfig(sessionId: string): Promise<Record<string, unknown>> {
+        const { machineId } = this.resolveCodexMachineContext(sessionId)
+        return await this.rpcGateway.reloadCodexMcpServerConfig(machineId)
+    }
+
+    async listCodexMcpServerStatus(
+        sessionId: string,
+        options: { cursor?: string | null; limit?: number } = {}
+    ): Promise<RpcCodexMcpStatusResponse> {
+        const { machineId } = this.resolveCodexMachineContext(sessionId)
+        return await this.rpcGateway.listCodexMcpServerStatus(machineId, options)
     }
 }

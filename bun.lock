@@ -230,6 +230,16 @@
 
     "@aiflyzx/hapi": ["@aiflyzx/hapi@workspace:cli"],
 
+    "@aiflyzx/hapi-darwin-arm64": ["@aiflyzx/hapi-darwin-arm64@0.16.4", "", { "os": "darwin", "cpu": "arm64", "bin": { "hapi": "bin/hapi" } }, "sha512-qvlmmprbCbvPK2yChbFV37l4aUTYdV6qQOPRaIC0+SowOXbTA9d5TCPFxHSkOAwnT2lAR2t9JnDBK8A70S0cHQ=="],
+
+    "@aiflyzx/hapi-darwin-x64": ["@aiflyzx/hapi-darwin-x64@0.16.4", "", { "os": "darwin", "cpu": "x64", "bin": { "hapi": "bin/hapi" } }, "sha512-YRsz+6xUcN4TIRPb1QI+Cb6LNAjno776M9HCdePlVzVU19PaloW80GdZTT62moFWY535B37L3rIfUqlIGS3jsw=="],
+
+    "@aiflyzx/hapi-linux-arm64": ["@aiflyzx/hapi-linux-arm64@0.16.4", "", { "os": "linux", "cpu": "arm64", "bin": { "hapi": "bin/hapi" } }, "sha512-wBbJoGLNczt2EQAS8BMh29HcZco+HrlQWEh3XH3nsNQK+8VUlGqPAi4IYxA2vIuBRK1WMca/NvCmIyHTVCJxqg=="],
+
+    "@aiflyzx/hapi-linux-x64": ["@aiflyzx/hapi-linux-x64@0.16.4", "", { "os": "linux", "cpu": "x64", "bin": { "hapi": "bin/hapi" } }, "sha512-ojUILP7BOcgZpM5a9up3AvxrU1lm5FWQxUSkwRNIx8TDIOjUfcA6T7YE30CmY2XDshxgvFNbr7a0lkWiQC/T8Q=="],
+
+    "@aiflyzx/hapi-win32-x64": ["@aiflyzx/hapi-win32-x64@0.16.4", "", { "os": "win32", "cpu": "x64", "bin": { "hapi": "bin/hapi.exe" } }, "sha512-usQki0U1yEV88Fgb6IVvqeQakBJBNPsxcEKfACWGzPidHcXANk17x0hdJ0WIDFYKaqJDR+1hSifKf557oiTi9A=="],
+
     "@alcalzone/ansi-tokenize": ["@alcalzone/ansi-tokenize@0.2.2", "", { "dependencies": { "ansi-styles": "^6.2.1", "is-fullwidth-code-point": "^5.0.0" } }, "sha512-mkOh+Wwawzuf5wa30bvc4nA+Qb6DIrGWgBhRR/Pw4T9nsgYait8izvXkNyU78D6Wcu3Z+KUdwCmLCxlWjEotYA=="],
 
     "@algolia/abtesting": ["@algolia/abtesting@1.12.2", "", { "dependencies": { "@algolia/client-common": "5.46.2", "@algolia/requester-browser-xhr": "5.46.2", "@algolia/requester-fetch": "5.46.2", "@algolia/requester-node-http": "5.46.2" } }, "sha512-oWknd6wpfNrmRcH0vzed3UPX0i17o4kYLM5OMITyMVM2xLgaRbIafoxL0e8mcrNNb0iORCJA0evnNDKRYth5WQ=="],

@@ -54,10 +54,41 @@ export interface ThreadReadResponse {
     [key: string]: unknown;
 }
 
+export interface ThreadArchiveParams {
+    threadId: string;
+}
+
+export interface ThreadArchiveResponse {
+    [key: string]: unknown;
+}
+
+export interface ThreadUnarchiveParams {
+    threadId: string;
+}
+
+export interface ThreadUnarchiveResponse {
+    thread?: {
+        id?: string;
+        name?: string | null;
+        [key: string]: unknown;
+    };
+    [key: string]: unknown;
+}
+
+export interface ThreadCompactStartParams {
+    threadId: string;
+}
+
+export interface ThreadCompactStartResponse {
+    [key: string]: unknown;
+}
+
 export interface ThreadListParams {
     cursor?: string | null;
     limit?: number;
     archived?: boolean;
+    cwd?: string;
+    sortKey?: string;
     modelProviders?: string[];
     sourceKinds?: string[];
 }
@@ -65,6 +96,78 @@ export interface ThreadListParams {
 export interface ThreadListResponse {
     data?: Array<Record<string, unknown>>;
     nextCursor?: string | null;
+    [key: string]: unknown;
+}
+
+export interface SkillsListParams {
+    cwds?: string[];
+    forceReload?: boolean;
+    perCwdExtraUserRoots?: Array<{
+        cwd: string;
+        extraUserRoots: string[];
+    }>;
+}
+
+export interface SkillsListResponse {
+    data?: Array<{
+        cwd?: string;
+        skills?: Array<Record<string, unknown>>;
+        errors?: unknown[];
+        [key: string]: unknown;
+    }>;
+    [key: string]: unknown;
+}
+
+export interface McpServerStatusListParams {
+    cursor?: string | null;
+    limit?: number;
+}
+
+export interface McpServerStatusListResponse {
+    data?: Array<Record<string, unknown>>;
+    nextCursor?: string | null;
+    [key: string]: unknown;
+}
+
+export interface ConfigMcpServerReloadParams {
+    [key: string]: never;
+}
+
+export interface ConfigMcpServerReloadResponse {
+    [key: string]: unknown;
+}
+
+export interface ConfigReadParams {
+    includeLayers?: boolean;
+}
+
+export interface ConfigReadResponse {
+    config?: Record<string, unknown>;
+    origins?: Record<string, unknown>;
+    [key: string]: unknown;
+}
+
+export interface ConfigValueWriteParams {
+    keyPath: string;
+    value: unknown;
+    mergeStrategy?: string;
+}
+
+export interface ConfigValueWriteResponse {
+    [key: string]: unknown;
+}
+
+export interface ConfigBatchWriteEdit {
+    keyPath: string;
+    value: unknown;
+    mergeStrategy?: string;
+}
+
+export interface ConfigBatchWriteParams {
+    edits: ConfigBatchWriteEdit[];
+}
+
+export interface ConfigBatchWriteResponse {
     [key: string]: unknown;
 }
 

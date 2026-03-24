@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import type { ToolCallBlock } from '@/chat/types'
-import { ChecklistList, extractTodoChecklist, extractUpdatePlanChecklist } from '@/components/ToolCard/checklist'
+import { ChecklistList, extractTodoChecklist, extractUpdatePlanChecklist, extractUpdatePlanState } from '@/components/ToolCard/checklist'
 import { getToolPresentation } from '@/components/ToolCard/knownTools'
 import { getToolViewComponent } from '@/components/ToolCard/views/_all'
 import { UpdatePlanView } from '@/components/ToolCard/views/UpdatePlanView'
@@ -80,6 +80,46 @@ describe('extractUpdatePlanChecklist', () => {
     })
 })
 
+describe('extractUpdatePlanState', () => {
+    it('returns explanation and plan items from update_plan input', () => {
+        const state = extractUpdatePlanState(
+            {
+                explanation: 'Keep the rollout focused and verify each milestone.',
+                plan: [
+                    { step: 'Add routes', status: 'completed' },
+                    { step: 'Render new plan card', status: 'in_progress' }
+                ]
+            },
+            null
+        )
+
+        expect(state).toEqual({
+            explanation: 'Keep the rollout focused and verify each milestone.',
+            draft: null,
+            items: [
+                { text: 'Add routes', status: 'completed', id: undefined },
+                { text: 'Render new plan card', status: 'in_progress', id: undefined }
+            ]
+        })
+    })
+
+    it('returns plan draft text when the update only contains streamed plan text', () => {
+        const state = extractUpdatePlanState(
+            {
+                draft: '1. Inspect current config\\n2. Apply focused edit',
+                isDraft: true
+            },
+            null
+        )
+
+        expect(state).toEqual({
+            explanation: null,
+            draft: '1. Inspect current config\\n2. Apply focused edit',
+            items: []
+        })
+    })
+})
+
 describe('extractTodoChecklist', () => {
     it('uses result.newTodos when input.todos is unavailable', () => {
         const items = extractTodoChecklist(
@@ -131,6 +171,21 @@ describe('update_plan tool presentation', () => {
         expect(presentation.subtitle).toBeNull()
         expect(presentation.minimal).toBe(true)
     })
+
+    it('renders draft plans as non-minimal cards', () => {
+        const presentation = getToolPresentation({
+            toolName: 'update_plan',
+            input: { draft: 'Planning draft...', isDraft: true },
+            result: undefined,
+            childrenCount: 0,
+            description: null,
+            metadata: null
+        })
+
+        expect(presentation.title).toBe('Plan')
+        expect(presentation.subtitle).toBe('Drafting…')
+        expect(presentation.minimal).toBe(false)
+    })
 })
 
 describe('UpdatePlanView', () => {
@@ -156,6 +211,42 @@ describe('UpdatePlanView', () => {
         expect(completed.className).toContain('line-through')
         expect(inProgress.className).toContain('text-[var(--app-link)]')
         expect(pending.className).toContain('text-[var(--app-hint)]')
+    })
+
+    it('renders explanation and status summary badges', () => {
+        render(
+            <UpdatePlanView
+                block={makeUpdatePlanBlock({
+                    explanation: 'Keep the rollout focused and verify each milestone.',
+                    plan: [
+                        { step: 'Add routes', status: 'completed' },
+                        { step: 'Render new plan card', status: 'in_progress' },
+                        { step: 'Ship it', status: 'pending' }
+                    ]
+                })}
+                metadata={null}
+            />
+        )
+
+        expect(screen.getByText('Keep the rollout focused and verify each milestone.')).toBeInTheDocument()
+        expect(screen.getAllByText('1 completed').length).toBeGreaterThan(0)
+        expect(screen.getAllByText('1 in progress').length).toBeGreaterThan(0)
+        expect(screen.getAllByText('1 pending').length).toBeGreaterThan(0)
+    })
+
+    it('renders streamed plan draft text', () => {
+        render(
+            <UpdatePlanView
+                block={makeUpdatePlanBlock({
+                    draft: '1. Inspect current config\n2. Apply focused edit',
+                    isDraft: true
+                })}
+                metadata={null}
+            />
+        )
+
+        expect(screen.getByText('Drafting plan…')).toBeInTheDocument()
+        expect(screen.getByText(/Inspect current config/)).toBeInTheDocument()
     })
 
     it('is registered as the compact tool view', () => {

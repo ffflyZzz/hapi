@@ -47,6 +47,16 @@ function normalizeItemType(value: unknown): string | null {
     return raw.toLowerCase().replace(/[\s_-]/g, '');
 }
 
+function normalizePlanStatus(value: unknown): 'pending' | 'in_progress' | 'completed' {
+    const raw = asString(value);
+    if (!raw) return 'pending';
+
+    const normalized = raw.toLowerCase().replace(/[\s-]/g, '_');
+    if (normalized === 'completed') return 'completed';
+    if (normalized === 'in_progress' || normalized === 'inprogress') return 'in_progress';
+    return 'pending';
+}
+
 function extractCommand(value: unknown): string | null {
     if (typeof value === 'string') return value;
     if (Array.isArray(value)) {
@@ -253,7 +263,7 @@ export class AppServerEventConverter {
             return this.handleWrappedCodexEvent(paramsRecord) ?? events;
         }
 
-        if (method === 'account/rateLimits/updated' || method === 'turn/plan/updated' || method === 'thread/compacted') {
+        if (method === 'account/rateLimits/updated' || method === 'thread/compacted') {
             return events;
         }
 
@@ -262,6 +272,26 @@ export class AppServerEventConverter {
             const threadId = asString(thread.threadId ?? thread.thread_id ?? thread.id);
             if (threadId) {
                 events.push({ type: 'thread_started', thread_id: threadId });
+            }
+            return events;
+        }
+
+        if (method === 'thread/archived' || method === 'thread/unarchived') {
+            const threadId = asString(paramsRecord.threadId ?? paramsRecord.thread_id ?? asRecord(paramsRecord.thread)?.id);
+            if (threadId) {
+                events.push({
+                    type: method === 'thread/archived' ? 'thread_archived' : 'thread_unarchived',
+                    thread_id: threadId
+                });
+            }
+            return events;
+        }
+
+        if (method === 'thread/status/changed') {
+            const threadId = asString(paramsRecord.threadId ?? paramsRecord.thread_id ?? asRecord(paramsRecord.thread)?.id);
+            const status = asString(paramsRecord.status);
+            if (threadId && status) {
+                events.push({ type: 'thread_status_changed', thread_id: threadId, status });
             }
             return events;
         }
@@ -298,6 +328,35 @@ export class AppServerEventConverter {
             const diff = asString(paramsRecord.diff ?? paramsRecord.unified_diff ?? paramsRecord.unifiedDiff);
             if (diff) {
                 events.push({ type: 'turn_diff', unified_diff: diff });
+            }
+            return events;
+        }
+
+        if (method === 'turn/plan/updated') {
+            const turn = asRecord(paramsRecord.turn);
+            const turnId = asString(paramsRecord.turnId ?? paramsRecord.turn_id ?? turn?.id);
+            const explanation = asString(paramsRecord.explanation);
+            const plan = Array.isArray(paramsRecord.plan)
+                ? paramsRecord.plan
+                    .map((entry) => {
+                        const record = asRecord(entry);
+                        const step = asString(record?.step);
+                        if (!step) return null;
+                        return {
+                            step,
+                            status: normalizePlanStatus(record?.status)
+                        };
+                    })
+                    .filter((entry): entry is { step: string; status: 'pending' | 'in_progress' | 'completed' } => entry !== null)
+                : [];
+
+            if (turnId || explanation || plan.length > 0) {
+                events.push({
+                    type: 'plan_updated',
+                    ...(turnId ? { turn_id: turnId } : {}),
+                    ...(explanation ? { explanation } : {}),
+                    plan
+                });
             }
             return events;
         }
@@ -345,6 +404,21 @@ export class AppServerEventConverter {
                 const prev = this.reasoningBuffers.get(itemId) ?? '';
                 this.reasoningBuffers.set(itemId, prev + delta);
                 events.push({ type: 'agent_reasoning_delta', delta });
+            }
+            return events;
+        }
+
+        if (method === 'item/plan/delta') {
+            const itemId = extractItemId(paramsRecord) ?? 'plan';
+            const turnId = asString(paramsRecord.turnId ?? paramsRecord.turn_id);
+            const delta = asString(paramsRecord.delta ?? paramsRecord.text ?? paramsRecord.message);
+            if (delta) {
+                events.push({
+                    type: 'plan_delta',
+                    item_id: itemId,
+                    ...(turnId ? { turn_id: turnId } : {}),
+                    delta
+                });
             }
             return events;
         }
@@ -498,6 +572,49 @@ export class AppServerEventConverter {
                     });
 
                     this.fileChangeMeta.delete(itemId);
+                }
+
+                return events;
+            }
+
+            if (itemType === 'contextcompaction') {
+                if (method === 'item/started') {
+                    events.push({
+                        type: 'context_compaction_begin',
+                        call_id: itemId
+                    });
+                }
+
+                if (method === 'item/completed') {
+                    const status = asString(item.status);
+                    events.push({
+                        type: 'context_compaction_end',
+                        call_id: itemId,
+                        ...(status ? { status } : {})
+                    });
+                }
+
+                return events;
+            }
+
+            if (itemType === 'plan') {
+                const turnId = asString(paramsRecord.turnId ?? paramsRecord.turn_id);
+                if (method === 'item/started') {
+                    events.push({
+                        type: 'plan_item_started',
+                        item_id: itemId,
+                        ...(turnId ? { turn_id: turnId } : {})
+                    });
+                }
+
+                if (method === 'item/completed') {
+                    const text = extractItemText(item);
+                    events.push({
+                        type: 'plan_item_completed',
+                        item_id: itemId,
+                        ...(turnId ? { turn_id: turnId } : {}),
+                        ...(text ? { text } : {})
+                    });
                 }
 
                 return events;

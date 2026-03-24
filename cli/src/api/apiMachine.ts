@@ -15,6 +15,17 @@ import { RpcHandlerManager } from './rpc/RpcHandlerManager'
 import { registerCommonHandlers } from '../modules/common/registerCommonHandlers'
 import type { SpawnSessionOptions, SpawnSessionResult } from '../modules/common/rpcTypes'
 import { applyVersionedAck } from './versionedUpdate'
+import {
+    batchWriteCodexConfig,
+    listCodexMcpServerStatus,
+    listCodexSkills,
+    listCodexThreads,
+    readCodexConfig,
+    readCodexThread,
+    reloadCodexMcpServerConfig,
+    unarchiveCodexThread,
+    writeCodexConfigValue
+} from '@/codex/codexAppServerAdmin'
 
 interface ServerToRunnerEvents {
     update: (data: Update) => void
@@ -62,6 +73,50 @@ interface PathExistsRequest {
 
 interface PathExistsResponse {
     exists: Record<string, boolean>
+}
+
+type CodexThreadReadRequest = {
+    threadId: string
+    includeTurns?: boolean
+}
+
+type CodexThreadListRequest = {
+    cursor?: string | null
+    limit?: number
+    archived?: boolean
+    cwd?: string
+}
+
+type CodexThreadUnarchiveRequest = {
+    threadId: string
+}
+
+type CodexSkillsListRequest = {
+    cwd?: string
+    forceReload?: boolean
+}
+
+type CodexConfigReadRequest = {
+    includeLayers?: boolean
+}
+
+type CodexConfigValueWriteRequest = {
+    keyPath: string
+    value: unknown
+    mergeStrategy?: string
+}
+
+type CodexConfigBatchWriteRequest = {
+    edits: Array<{
+        keyPath: string
+        value: unknown
+        mergeStrategy?: string
+    }>
+}
+
+type CodexMcpStatusListRequest = {
+    cursor?: string | null
+    limit?: number
 }
 
 export class ApiMachineClient {
@@ -150,6 +205,81 @@ export class ApiMachineClient {
         this.rpcHandlerManager.registerHandler('stop-runner', () => {
             setTimeout(() => requestShutdown(), 100)
             return { message: 'Runner stop request acknowledged' }
+        })
+
+        this.rpcHandlerManager.registerHandler<CodexThreadReadRequest>('codex-thread-read', async (params) => {
+            if (!params?.threadId || typeof params.threadId !== 'string') {
+                throw new Error('threadId is required')
+            }
+            return await readCodexThread({
+                threadId: params.threadId,
+                includeTurns: params.includeTurns
+            })
+        })
+
+        this.rpcHandlerManager.registerHandler<CodexThreadListRequest>('codex-thread-list', async (params) => {
+            return await listCodexThreads({
+                cursor: params?.cursor,
+                limit: params?.limit,
+                archived: params?.archived,
+                ...(params?.cwd ? { cwd: params.cwd } : {})
+            })
+        })
+
+        this.rpcHandlerManager.registerHandler<CodexThreadUnarchiveRequest>('codex-thread-unarchive', async (params) => {
+            if (!params?.threadId || typeof params.threadId !== 'string') {
+                throw new Error('threadId is required')
+            }
+            return await unarchiveCodexThread({ threadId: params.threadId })
+        })
+
+        this.rpcHandlerManager.registerHandler<CodexSkillsListRequest>('codex-skills-list', async (params) => {
+            return await listCodexSkills({
+                ...(params?.cwd ? { cwds: [params.cwd] } : {}),
+                forceReload: params?.forceReload
+            })
+        })
+
+        this.rpcHandlerManager.registerHandler<CodexConfigReadRequest>('codex-config-read', async (params) => {
+            return await readCodexConfig({
+                includeLayers: params?.includeLayers
+            })
+        })
+
+        this.rpcHandlerManager.registerHandler<CodexConfigValueWriteRequest>('codex-config-value-write', async (params) => {
+            if (!params?.keyPath || typeof params.keyPath !== 'string') {
+                throw new Error('keyPath is required')
+            }
+            return await writeCodexConfigValue({
+                keyPath: params.keyPath,
+                value: params.value,
+                mergeStrategy: params.mergeStrategy
+            })
+        })
+
+        this.rpcHandlerManager.registerHandler<CodexConfigBatchWriteRequest>('codex-config-batch-write', async (params) => {
+            const edits = Array.isArray(params?.edits) ? params.edits : null
+            if (!edits) {
+                throw new Error('edits is required')
+            }
+            return await batchWriteCodexConfig({
+                edits: edits.map((edit) => ({
+                    keyPath: edit.keyPath,
+                    value: edit.value,
+                    mergeStrategy: edit.mergeStrategy
+                }))
+            })
+        })
+
+        this.rpcHandlerManager.registerHandler('codex-mcp-reload', async () => {
+            return await reloadCodexMcpServerConfig()
+        })
+
+        this.rpcHandlerManager.registerHandler<CodexMcpStatusListRequest>('codex-mcp-status-list', async (params) => {
+            return await listCodexMcpServerStatus({
+                cursor: params?.cursor,
+                limit: params?.limit
+            })
         })
     }
 

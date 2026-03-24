@@ -44,6 +44,48 @@ export type RpcPathExistsResponse = {
     exists: Record<string, boolean>
 }
 
+export type RpcCodexThreadReadResponse = {
+    thread?: Record<string, unknown>
+    [key: string]: unknown
+}
+
+export type RpcCodexThreadListResponse = {
+    data?: Array<Record<string, unknown>>
+    nextCursor?: string | null
+    [key: string]: unknown
+}
+
+export type RpcCodexSkillsResponse = {
+    data?: Array<Record<string, unknown>>
+    [key: string]: unknown
+}
+
+export type RpcCodexConfigResponse = {
+    config?: Record<string, unknown>
+    origins?: Record<string, unknown>
+    [key: string]: unknown
+}
+
+export type RpcCodexConfigWriteValueParams = {
+    keyPath: string
+    value: unknown
+    mergeStrategy?: string
+}
+
+export type RpcCodexConfigBatchWriteParams = {
+    edits: Array<{
+        keyPath: string
+        value: unknown
+        mergeStrategy?: string
+    }>
+}
+
+export type RpcCodexMcpStatusResponse = {
+    data?: Array<Record<string, unknown>>
+    nextCursor?: string | null
+    [key: string]: unknown
+}
+
 export class RpcGateway {
     constructor(
         private readonly io: Server,
@@ -102,6 +144,14 @@ export class RpcGateway {
 
     async killSession(sessionId: string): Promise<void> {
         await this.sessionRpc(sessionId, 'killSession', {})
+    }
+
+    async archiveCodexThread(sessionId: string): Promise<Record<string, unknown>> {
+        return await this.sessionRpc(sessionId, 'archive-thread', {}) as Record<string, unknown>
+    }
+
+    async compactCodexThread(sessionId: string): Promise<Record<string, unknown>> {
+        return await this.sessionRpc(sessionId, 'compact-thread', {}) as Record<string, unknown>
     }
 
     async spawnSession(
@@ -226,6 +276,68 @@ export class RpcGateway {
             skills?: Array<{ name: string; description?: string }>
             error?: string
         }
+    }
+
+    async readCodexThread(
+        machineId: string,
+        params: { threadId: string; includeTurns?: boolean }
+    ): Promise<RpcCodexThreadReadResponse> {
+        return await this.machineRpc(machineId, 'codex-thread-read', params) as RpcCodexThreadReadResponse
+    }
+
+    async listCodexThreads(
+        machineId: string,
+        params: {
+            cursor?: string | null
+            limit?: number
+            archived?: boolean
+            cwd?: string
+        }
+    ): Promise<RpcCodexThreadListResponse> {
+        return await this.machineRpc(machineId, 'codex-thread-list', params) as RpcCodexThreadListResponse
+    }
+
+    async unarchiveCodexThread(machineId: string, threadId: string): Promise<RpcCodexThreadReadResponse> {
+        return await this.machineRpc(machineId, 'codex-thread-unarchive', { threadId }) as RpcCodexThreadReadResponse
+    }
+
+    async listCodexSkills(
+        machineId: string,
+        params: { cwd?: string; forceReload?: boolean }
+    ): Promise<RpcCodexSkillsResponse> {
+        return await this.machineRpc(machineId, 'codex-skills-list', params) as RpcCodexSkillsResponse
+    }
+
+    async readCodexConfig(
+        machineId: string,
+        params: { includeLayers?: boolean }
+    ): Promise<RpcCodexConfigResponse> {
+        return await this.machineRpc(machineId, 'codex-config-read', params) as RpcCodexConfigResponse
+    }
+
+    async writeCodexConfigValue(
+        machineId: string,
+        params: RpcCodexConfigWriteValueParams
+    ): Promise<Record<string, unknown>> {
+        return await this.machineRpc(machineId, 'codex-config-value-write', params) as Record<string, unknown>
+    }
+
+    async batchWriteCodexConfig(
+        machineId: string,
+        params: RpcCodexConfigBatchWriteParams
+    ): Promise<Record<string, unknown>> {
+        return await this.machineRpc(machineId, 'codex-config-batch-write', params) as Record<string, unknown>
+    }
+
+    async reloadCodexMcpServerConfig(machineId: string): Promise<Record<string, unknown>> {
+        return await this.machineRpc(machineId, 'codex-mcp-reload', {}) as Record<string, unknown>
+    }
+
+    async listCodexMcpServerStatus(
+        machineId: string,
+        params: { cursor?: string | null; limit?: number }
+    ): Promise<RpcCodexMcpStatusResponse> {
+        return await this.machineRpc(machineId, 'codex-mcp-status-list', params) as RpcCodexMcpStatusResponse
     }
 
     private async sessionRpc(sessionId: string, method: string, params: unknown): Promise<unknown> {

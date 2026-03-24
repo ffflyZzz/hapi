@@ -32,6 +32,35 @@ const uploadDeleteSchema = z.object({
     path: z.string().min(1)
 })
 
+const codexConfigQuerySchema = z.object({
+    includeLayers: z.enum(['true', 'false']).optional()
+})
+
+const codexConfigValueWriteSchema = z.object({
+    keyPath: z.string().trim().min(1),
+    value: z.unknown(),
+    mergeStrategy: z.string().trim().min(1).optional()
+})
+
+const codexConfigBatchWriteSchema = z.object({
+    edits: z.array(codexConfigValueWriteSchema).min(1)
+})
+
+const codexMcpStatusQuerySchema = z.object({
+    cursor: z.string().min(1).optional(),
+    limit: z.coerce.number().int().positive().max(100).optional()
+})
+
+const codexThreadsQuerySchema = z.object({
+    cursor: z.string().min(1).optional(),
+    limit: z.coerce.number().int().positive().max(100).optional(),
+    archived: z.enum(['true', 'false']).optional()
+})
+
+const skillsQuerySchema = z.object({
+    forceReload: z.enum(['true', 'false']).optional()
+})
+
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 function estimateBase64Bytes(base64: string): number {
@@ -43,6 +72,17 @@ function estimateBase64Bytes(base64: string): number {
 
 export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
+
+    const requireCodexSession = (session: Session): Response | null => {
+        const flavor = session.metadata?.flavor ?? 'claude'
+        if (flavor !== 'codex') {
+            return new Response(JSON.stringify({ error: 'Codex tools are only supported for Codex sessions' }), {
+                status: 400,
+                headers: { 'content-type': 'application/json' }
+            })
+        }
+        return null
+    }
 
     app.get('/sessions', (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
@@ -201,6 +241,15 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
         if (sessionResult instanceof Response) {
             return sessionResult
+        }
+
+        const flavor = sessionResult.session.metadata?.flavor ?? 'claude'
+        if (flavor === 'codex') {
+            if (sessionResult.session.agentState?.controlledByUser === true) {
+                return c.json({ error: 'Codex thread archive can only be used for remote Codex sessions' }, 409)
+            }
+            await engine.archiveCodexThread(sessionResult.sessionId)
+            return c.json({ ok: true })
         }
 
         await engine.archiveSession(sessionResult.sessionId)
@@ -421,14 +470,300 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return sessionResult
         }
 
+        const query = skillsQuerySchema.safeParse({
+            forceReload: c.req.query('forceReload') || undefined
+        })
+        if (!query.success) {
+            return c.json({ error: 'Invalid query' }, 400)
+        }
+
         try {
-            const result = await engine.listSkills(sessionResult.sessionId)
+            const isCodex = (sessionResult.session.metadata?.flavor ?? 'claude') === 'codex'
+            const result = isCodex
+                ? await engine.listCodexSkills(sessionResult.sessionId, {
+                    forceReload: query.data.forceReload === 'true'
+                })
+                : await engine.listSkills(sessionResult.sessionId)
             return c.json(result)
         } catch (error) {
             return c.json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to list skills'
             })
+        }
+    })
+
+    app.get('/sessions/:id/codex/thread', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const codexError = requireCodexSession(sessionResult.session)
+        if (codexError) {
+            return codexError
+        }
+
+        try {
+            const result = await engine.readCodexThread(sessionResult.sessionId)
+            return c.json(result)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to read Codex thread'
+            return c.json({ error: message }, 409)
+        }
+    })
+
+    app.get('/sessions/:id/codex/threads', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const codexError = requireCodexSession(sessionResult.session)
+        if (codexError) {
+            return codexError
+        }
+
+        const query = codexThreadsQuerySchema.safeParse({
+            cursor: c.req.query('cursor') || undefined,
+            limit: c.req.query('limit') || undefined,
+            archived: c.req.query('archived') || undefined
+        })
+        if (!query.success) {
+            return c.json({ error: 'Invalid query' }, 400)
+        }
+
+        try {
+            const result = await engine.listCodexThreads(sessionResult.sessionId, {
+                cursor: query.data.cursor ?? undefined,
+                limit: query.data.limit,
+                archived: query.data.archived === 'true'
+            })
+            return c.json(result)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to list Codex threads'
+            return c.json({ error: message }, 409)
+        }
+    })
+
+    app.post('/sessions/:id/codex/unarchive-thread', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const codexError = requireCodexSession(sessionResult.session)
+        if (codexError) {
+            return codexError
+        }
+
+        try {
+            const result = await engine.unarchiveCodexThread(sessionResult.sessionId)
+            return c.json({ ok: true, ...result })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to unarchive Codex thread'
+            return c.json({ error: message }, 409)
+        }
+    })
+
+    app.post('/sessions/:id/codex/compact-thread', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const codexError = requireCodexSession(sessionResult.session)
+        if (codexError) {
+            return codexError
+        }
+
+        if (sessionResult.session.agentState?.controlledByUser === true) {
+            return c.json({ error: 'Codex thread compaction can only be used for remote Codex sessions' }, 409)
+        }
+
+        try {
+            await engine.compactCodexThread(sessionResult.sessionId)
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to compact Codex thread'
+            return c.json({ error: message }, 409)
+        }
+    })
+
+    app.get('/sessions/:id/codex/config', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const codexError = requireCodexSession(sessionResult.session)
+        if (codexError) {
+            return codexError
+        }
+
+        const query = codexConfigQuerySchema.safeParse({
+            includeLayers: c.req.query('includeLayers') || undefined
+        })
+        if (!query.success) {
+            return c.json({ error: 'Invalid query' }, 400)
+        }
+
+        try {
+            const result = await engine.readCodexConfig(sessionResult.sessionId, {
+                includeLayers: query.data.includeLayers === 'true'
+            })
+            return c.json(result)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to read Codex config'
+            return c.json({ error: message }, 409)
+        }
+    })
+
+    app.post('/sessions/:id/codex/config/value', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const codexError = requireCodexSession(sessionResult.session)
+        if (codexError) {
+            return codexError
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = codexConfigValueWriteSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        try {
+            await engine.writeCodexConfigValue(sessionResult.sessionId, parsed.data)
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to write Codex config value'
+            return c.json({ error: message }, 409)
+        }
+    })
+
+    app.post('/sessions/:id/codex/config/batch', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const codexError = requireCodexSession(sessionResult.session)
+        if (codexError) {
+            return codexError
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = codexConfigBatchWriteSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        try {
+            await engine.batchWriteCodexConfig(sessionResult.sessionId, parsed.data)
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to batch write Codex config'
+            return c.json({ error: message }, 409)
+        }
+    })
+
+    app.get('/sessions/:id/codex/mcp-status', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const codexError = requireCodexSession(sessionResult.session)
+        if (codexError) {
+            return codexError
+        }
+
+        const query = codexMcpStatusQuerySchema.safeParse({
+            cursor: c.req.query('cursor') || undefined,
+            limit: c.req.query('limit') || undefined
+        })
+        if (!query.success) {
+            return c.json({ error: 'Invalid query' }, 400)
+        }
+
+        try {
+            const result = await engine.listCodexMcpServerStatus(sessionResult.sessionId, {
+                cursor: query.data.cursor ?? undefined,
+                limit: query.data.limit
+            })
+            return c.json(result)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to list Codex MCP status'
+            return c.json({ error: message }, 409)
+        }
+    })
+
+    app.post('/sessions/:id/codex/mcp-reload', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const codexError = requireCodexSession(sessionResult.session)
+        if (codexError) {
+            return codexError
+        }
+
+        try {
+            await engine.reloadCodexMcpServerConfig(sessionResult.sessionId)
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to reload Codex MCP config'
+            return c.json({ error: message }, 409)
         }
     })
 

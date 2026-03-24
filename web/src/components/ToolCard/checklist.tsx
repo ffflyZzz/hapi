@@ -9,6 +9,12 @@ export type ChecklistItem = {
     status: ChecklistStatus
 }
 
+export type UpdatePlanState = {
+    explanation: string | null
+    draft: string | null
+    items: ChecklistItem[]
+}
+
 function normalizeChecklistStatus(value: unknown): ChecklistStatus {
     if (value === 'completed') return 'completed'
     if (value === 'in_progress') return 'in_progress'
@@ -62,19 +68,51 @@ export function extractTodoChecklist(input: unknown, result: unknown): Checklist
 }
 
 export function extractUpdatePlanChecklist(input: unknown, result: unknown): ChecklistItem[] {
-    if (isObject(input) && Object.prototype.hasOwnProperty.call(input, 'plan')) {
-        return parseChecklistEntries(input.plan, {
+    return extractUpdatePlanState(input, result).items
+}
+
+export function extractUpdatePlanState(input: unknown, result: unknown): UpdatePlanState {
+    const inputRecord = isObject(input) ? input : null
+    const resultRecord = isObject(result) ? result : null
+
+    const explanation = typeof inputRecord?.explanation === 'string'
+        ? inputRecord.explanation
+        : typeof resultRecord?.explanation === 'string'
+            ? resultRecord.explanation
+            : null
+
+    const draft = typeof inputRecord?.draft === 'string'
+        ? inputRecord.draft
+        : typeof resultRecord?.draft === 'string'
+            ? resultRecord.draft
+            : null
+
+    const items = inputRecord && Object.prototype.hasOwnProperty.call(inputRecord, 'plan')
+        ? parseChecklistEntries(inputRecord.plan, {
             textKey: 'step'
         })
-    }
+        : resultRecord
+            ? parseChecklistEntries(resultRecord.plan, {
+                textKey: 'step'
+            })
+            : []
 
-    if (isObject(result)) {
-        return parseChecklistEntries(result.plan, {
-            textKey: 'step'
-        })
+    return {
+        explanation,
+        draft,
+        items
     }
+}
 
-    return []
+export function summarizeChecklist(items: ChecklistItem[]): Record<ChecklistStatus, number> {
+    return items.reduce<Record<ChecklistStatus, number>>((acc, item) => {
+        acc[item.status] += 1
+        return acc
+    }, {
+        pending: 0,
+        in_progress: 0,
+        completed: 0
+    })
 }
 
 function checklistTone(item: ChecklistItem): string {

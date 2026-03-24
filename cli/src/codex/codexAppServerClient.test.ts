@@ -118,6 +118,139 @@ describe('CodexAppServerClient wrappers', () => {
         );
     });
 
+    it('supports thread archive, unarchive, and compaction wrappers', async () => {
+        const { client, sendRequest } = setup();
+
+        sendRequest.mockResolvedValueOnce({});
+        await client.archiveThread({ threadId: 'thr_1' });
+        expect(sendRequest).toHaveBeenNthCalledWith(
+            1,
+            'thread/archive',
+            { threadId: 'thr_1' },
+            { signal: undefined, timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS }
+        );
+
+        sendRequest.mockResolvedValueOnce({ thread: { id: 'thr_1', name: 'Bug bash notes' } });
+        await client.unarchiveThread({ threadId: 'thr_1' });
+        expect(sendRequest).toHaveBeenNthCalledWith(
+            2,
+            'thread/unarchive',
+            { threadId: 'thr_1' },
+            { signal: undefined, timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS }
+        );
+
+        sendRequest.mockResolvedValueOnce({});
+        await client.startThreadCompaction({ threadId: 'thr_1' });
+        expect(sendRequest).toHaveBeenNthCalledWith(
+            3,
+            'thread/compact/start',
+            { threadId: 'thr_1' },
+            { signal: undefined, timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS }
+        );
+    });
+
+    it('supports skills, MCP status, MCP reload, and config read wrappers', async () => {
+        const { client, sendRequest } = setup();
+
+        sendRequest.mockResolvedValueOnce({
+            data: [
+                {
+                    cwd: '/repo',
+                    skills: [{ name: 'skill-creator', description: 'Create skills', enabled: true }],
+                    errors: []
+                }
+            ]
+        });
+        await client.listSkills({
+            cwds: ['/repo'],
+            forceReload: true,
+            perCwdExtraUserRoots: [{ cwd: '/repo', extraUserRoots: ['/skills'] }]
+        });
+        expect(sendRequest).toHaveBeenNthCalledWith(
+            1,
+            'skills/list',
+            {
+                cwds: ['/repo'],
+                forceReload: true,
+                perCwdExtraUserRoots: [{ cwd: '/repo', extraUserRoots: ['/skills'] }]
+            },
+            { signal: undefined, timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS }
+        );
+
+        sendRequest.mockResolvedValueOnce({ data: [], nextCursor: null });
+        await client.listMcpServerStatus({ limit: 20, cursor: null });
+        expect(sendRequest).toHaveBeenNthCalledWith(
+            2,
+            'mcpServerStatus/list',
+            { limit: 20, cursor: null },
+            { signal: undefined, timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS }
+        );
+
+        sendRequest.mockResolvedValueOnce({});
+        await client.reloadMcpServerConfig();
+        expect(sendRequest).toHaveBeenNthCalledWith(
+            3,
+            'config/mcpServer/reload',
+            {},
+            { signal: undefined, timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS }
+        );
+
+        sendRequest.mockResolvedValueOnce({ config: { apps: { _default: { enabled: true } } }, origins: {} });
+        await client.readConfig({ includeLayers: false });
+        expect(sendRequest).toHaveBeenNthCalledWith(
+            4,
+            'config/read',
+            { includeLayers: false },
+            { signal: undefined, timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS }
+        );
+    });
+
+    it('supports config write wrappers', async () => {
+        const { client, sendRequest } = setup();
+
+        sendRequest.mockResolvedValueOnce({});
+        await client.writeConfigValue({
+            keyPath: 'apps._default.enabled',
+            value: false,
+            mergeStrategy: 'replace'
+        });
+        expect(sendRequest).toHaveBeenNthCalledWith(
+            1,
+            'config/value/write',
+            {
+                keyPath: 'apps._default.enabled',
+                value: false,
+                mergeStrategy: 'replace'
+            },
+            { signal: undefined, timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS }
+        );
+
+        sendRequest.mockResolvedValueOnce({});
+        await client.batchWriteConfig({
+            edits: [
+                {
+                    keyPath: 'apps._default.enabled',
+                    value: true,
+                    mergeStrategy: 'upsert'
+                }
+            ]
+        });
+        expect(sendRequest).toHaveBeenNthCalledWith(
+            2,
+            'config/batchWrite',
+            {
+                edits: [
+                    {
+                        keyPath: 'apps._default.enabled',
+                        value: true,
+                        mergeStrategy: 'upsert'
+                    }
+                ]
+            },
+            { signal: undefined, timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS }
+        );
+    });
+
     it('keeps interrupt timeout short', async () => {
         const { client, sendRequest } = setup();
         sendRequest.mockResolvedValue({ ok: true });
