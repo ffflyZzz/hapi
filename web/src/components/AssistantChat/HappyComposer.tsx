@@ -27,6 +27,8 @@ import { Autocomplete } from '@/components/ChatInput/Autocomplete'
 import { StatusBar } from '@/components/AssistantChat/StatusBar'
 import { ComposerButtons } from '@/components/AssistantChat/ComposerButtons'
 import { AttachmentItem } from '@/components/AssistantChat/AttachmentItem'
+import { SlashSkillsDialog } from '@/components/AssistantChat/SlashSkillsDialog'
+import { CompactConfirmDialog } from '@/components/AssistantChat/CompactConfirmDialog'
 import { useTranslation } from '@/lib/use-translation'
 import { getClaudeComposerModelOptions, getNextClaudeComposerModel } from './claudeModelOptions'
 
@@ -125,6 +127,12 @@ export function HappyComposer(props: {
     const [isAborting, setIsAborting] = useState(false)
     const [isSwitching, setIsSwitching] = useState(false)
     const [showContinueHint, setShowContinueHint] = useState(false)
+    const [isSkillsDialogOpen, setIsSkillsDialogOpen] = useState(false)
+    const [slashSkillSuggestions, setSlashSkillSuggestions] = useState<Suggestion[]>([])
+    const [isSkillsDialogLoading, setIsSkillsDialogLoading] = useState(false)
+    const [skillsDialogError, setSkillsDialogError] = useState<string | null>(null)
+    const [isCompactDialogOpen, setIsCompactDialogOpen] = useState(false)
+    const [isCompactSubmitting, setIsCompactSubmitting] = useState(false)
 
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const prevControlledByUser = useRef(controlledByUser)
@@ -171,21 +179,20 @@ export function HappyComposer(props: {
         }
     }, [platformHaptic])
 
-    const handleSuggestionSelect = useCallback((index: number) => {
-        const suggestion = suggestions[index]
-        if (!suggestion || !textareaRef.current) return
-        if (suggestion.text.startsWith('$')) {
-            markSkillUsed(suggestion.text.slice(1))
-        }
+    const focusComposerAt = useCallback((cursorPosition: number) => {
+        setTimeout(() => {
+            const el = textareaRef.current
+            if (!el) return
+            el.setSelectionRange(cursorPosition, cursorPosition)
+            try {
+                el.focus({ preventScroll: true })
+            } catch {
+                el.focus()
+            }
+        }, 0)
+    }, [])
 
-        // For Codex user prompts with content, expand the content instead of command name
-        let textToInsert = suggestion.text
-        let addSpace = true
-        if (agentFlavor === 'codex' && suggestion.source === 'user' && suggestion.content) {
-            textToInsert = suggestion.content
-            addSpace = false
-        }
-
+    const applySuggestionText = useCallback((textToInsert: string, addSpace = true) => {
         const result = applySuggestion(
             inputState.text,
             inputState.selection,
@@ -199,20 +206,90 @@ export function HappyComposer(props: {
             text: result.text,
             selection: { start: result.cursorPosition, end: result.cursorPosition }
         })
+        focusComposerAt(result.cursorPosition)
+    }, [api, autocompletePrefixes, focusComposerAt, inputState])
 
-        setTimeout(() => {
-            const el = textareaRef.current
-            if (!el) return
-            el.setSelectionRange(result.cursorPosition, result.cursorPosition)
-            try {
-                el.focus({ preventScroll: true })
-            } catch {
-                el.focus()
-            }
-        }, 0)
+    const openSkillsDialog = useCallback(async () => {
+        setIsSkillsDialogOpen(true)
+        setIsSkillsDialogLoading(true)
+        setSkillsDialogError(null)
+        setSlashSkillSuggestions([])
 
+        try {
+            const suggestions = await autocompleteSuggestions('$')
+            setSlashSkillSuggestions(suggestions.filter((suggestion) => suggestion.text.startsWith('$')))
+        } catch (error) {
+            setSkillsDialogError(error instanceof Error ? error.message : t('composer.slashSkills.error'))
+        } finally {
+            setIsSkillsDialogLoading(false)
+        }
+    }, [autocompleteSuggestions, t])
+
+    const handleSlashSkillSelect = useCallback((suggestion: Suggestion) => {
+        if (suggestion.text.startsWith('$')) {
+            markSkillUsed(suggestion.text.slice(1))
+        }
+        applySuggestionText(suggestion.text, true)
+        setIsSkillsDialogOpen(false)
+        setSkillsDialogError(null)
+        setSlashSkillSuggestions([])
         haptic('light')
-    }, [api, suggestions, inputState, autocompletePrefixes, haptic, agentFlavor])
+    }, [applySuggestionText, haptic])
+
+    const handleCompactConfirm = useCallback(async () => {
+        const commandText = '/compact'
+        setIsCompactSubmitting(true)
+        try {
+            api.composer().setText(commandText)
+            setInputState({
+                text: commandText,
+                selection: { start: commandText.length, end: commandText.length }
+            })
+            await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+            api.composer().send()
+            setShowContinueHint(false)
+            setIsCompactDialogOpen(false)
+        } finally {
+            setIsCompactSubmitting(false)
+        }
+    }, [api])
+
+    const handleSuggestionSelect = useCallback((index: number) => {
+        const suggestion = suggestions[index]
+        if (!suggestion || !textareaRef.current) return
+        const suggestionCommand = suggestion.text.trim().toLowerCase()
+
+        if (suggestionCommand === '/skills') {
+            clearSuggestions()
+            setShowSettings(false)
+            haptic('light')
+            void openSkillsDialog()
+            return
+        }
+
+        if (suggestionCommand === '/compact') {
+            clearSuggestions()
+            setShowSettings(false)
+            haptic('light')
+            setIsCompactDialogOpen(true)
+            return
+        }
+
+        if (suggestion.text.startsWith('$')) {
+            markSkillUsed(suggestion.text.slice(1))
+        }
+
+        // For Codex user prompts with content, expand the content instead of command name
+        let textToInsert = suggestion.text
+        let addSpace = true
+        if (agentFlavor === 'codex' && suggestion.source === 'user' && suggestion.content) {
+            textToInsert = suggestion.content
+            addSpace = false
+        }
+
+        applySuggestionText(textToInsert, addSpace)
+        haptic('light')
+    }, [suggestions, clearSuggestions, haptic, openSkillsDialog, agentFlavor, applySuggestionText])
 
     const abortDisabled = controlsDisabled || isAborting || !threadIsRunning
     const switchDisabled = controlsDisabled || isSwitching || !controlledByUser
@@ -431,6 +508,8 @@ export function HappyComposer(props: {
         api.composer().send()
     }, [api])
 
+    const isSlashActionDialogOpen = isSkillsDialogOpen || isCompactDialogOpen
+
     const overlays = useMemo(() => {
         if (showSettings && (showCollaborationSettings || showPermissionSettings || showModelSettings)) {
             return (
@@ -559,7 +638,7 @@ export function HappyComposer(props: {
             )
         }
 
-        if (suggestions.length > 0) {
+        if (!isSlashActionDialogOpen && suggestions.length > 0) {
             return (
                 <div className="absolute bottom-[100%] mb-2 w-full">
                     <FloatingOverlay>
@@ -592,6 +671,7 @@ export function HappyComposer(props: {
         handlePermissionChange,
         handleModelChange,
         handleSuggestionSelect,
+        isSlashActionDialogOpen,
         t
     ])
 
@@ -663,6 +743,22 @@ export function HappyComposer(props: {
                         />
                     </div>
                 </ComposerPrimitive.Root>
+
+                <SlashSkillsDialog
+                    isOpen={isSkillsDialogOpen}
+                    isLoading={isSkillsDialogLoading}
+                    error={skillsDialogError}
+                    suggestions={slashSkillSuggestions}
+                    onClose={() => setIsSkillsDialogOpen(false)}
+                    onSelect={handleSlashSkillSelect}
+                />
+
+                <CompactConfirmDialog
+                    isOpen={isCompactDialogOpen}
+                    isPending={isCompactSubmitting}
+                    onClose={() => setIsCompactDialogOpen(false)}
+                    onConfirm={handleCompactConfirm}
+                />
             </div>
         </div>
     )
